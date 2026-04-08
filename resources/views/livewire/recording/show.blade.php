@@ -102,6 +102,7 @@
                                     $speakerIndex[$sp] = count($speakerIndex);
                                 }
                             }
+                            $speakerMap = is_array($recording->speaker_map) ? $recording->speaker_map : [];
                         @endphp
                         <div x-data="{ copied: false, view: '{{ $hasSegments ? 'speakers' : 'plain' }}' }" class="space-y-3">
                             <div class="flex items-center justify-between">
@@ -133,6 +134,41 @@
                                 </x-ui-button>
                             </div>
 
+                            {{-- Sprecher-Legende (rename) --}}
+                            @if($hasSegments && count($speakerIndex) > 0)
+                                <div x-show="view === 'speakers'" class="flex flex-wrap gap-2 p-3 rounded-lg bg-[var(--ui-muted-5)] border border-[var(--ui-border)]">
+                                    <div class="text-xs text-[var(--ui-muted)] self-center mr-1">Sprecher benennen:</div>
+                                    @foreach($speakerIndex as $sp => $idx)
+                                        @php
+                                            $legendPalette = $speakerPalette[$idx % count($speakerPalette)];
+                                            $currentName = $speakerMap[$sp] ?? '';
+                                        @endphp
+                                        <div x-data="{ editing: false, value: @js($currentName) }" class="inline-flex items-center gap-1.5 px-2 py-1 rounded-md bg-white border border-{{ $legendPalette }}-300">
+                                            <span class="inline-flex items-center justify-center w-6 h-6 rounded-full bg-{{ $legendPalette }}-500 text-white text-[10px] font-bold">{{ $sp }}</span>
+                                            <template x-if="!editing">
+                                                <button type="button"
+                                                        class="text-xs font-medium text-[var(--ui-fg)] hover:text-[var(--ui-primary)]"
+                                                        @click="editing = true; $nextTick(() => $refs.input.focus())">
+                                                    <span x-text="value || 'Name hinzufügen…'"
+                                                          :class="value ? '' : 'italic text-[var(--ui-muted)]'"></span>
+                                                </button>
+                                            </template>
+                                            <template x-if="editing">
+                                                <input type="text"
+                                                       x-ref="input"
+                                                       x-model="value"
+                                                       @keydown.enter.prevent="editing = false; $wire.renameSpeaker(@js($sp), value)"
+                                                       @keydown.escape="editing = false; value = @js($currentName)"
+                                                       @blur="editing = false; $wire.renameSpeaker(@js($sp), value)"
+                                                       placeholder="Name"
+                                                       maxlength="80"
+                                                       class="text-xs px-1 py-0.5 border border-{{ $legendPalette }}-400 rounded outline-none focus:ring-1 focus:ring-{{ $legendPalette }}-500 w-32">
+                                            </template>
+                                        </div>
+                                    @endforeach
+                                </div>
+                            @endif
+
                             {{-- Sprecher-Ansicht --}}
                             @if($hasSegments)
                                 <div x-show="view === 'speakers'" x-ref="transcript" class="space-y-3">
@@ -143,12 +179,16 @@
                                             $start = (int) floor((float) ($seg['start'] ?? 0));
                                             $mm = str_pad((string) intdiv($start, 60), 2, '0', STR_PAD_LEFT);
                                             $ss = str_pad((string) ($start % 60), 2, '0', STR_PAD_LEFT);
+                                            $displayName = $speakerMap[$sp] ?? null;
                                         @endphp
                                         <div class="flex gap-3 p-3 rounded-lg bg-{{ $paletteKey }}-50 border border-{{ $paletteKey }}-200">
                                             <div class="flex-shrink-0 flex flex-col items-center min-w-[3.5rem]">
                                                 <span class="inline-flex items-center justify-center w-9 h-9 rounded-full bg-{{ $paletteKey }}-500 text-white text-xs font-bold">
                                                     {{ $sp }}
                                                 </span>
+                                                @if($displayName)
+                                                    <span class="mt-1 text-[10px] font-semibold text-{{ $paletteKey }}-700 text-center leading-tight max-w-[5rem] truncate">{{ $displayName }}</span>
+                                                @endif
                                                 <span class="mt-1 text-[10px] font-mono text-{{ $paletteKey }}-700">{{ $mm }}:{{ $ss }}</span>
                                             </div>
                                             <div class="flex-1 text-sm leading-relaxed text-[var(--ui-fg)] whitespace-pre-wrap">{{ $seg['text'] ?? '' }}</div>

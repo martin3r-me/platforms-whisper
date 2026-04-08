@@ -37,7 +37,7 @@
             </div>
 
             {{-- Recorder Panel --}}
-            <x-ui-panel title="Audio aufnehmen" subtitle="Lange Meetings sind ok — Aufnahme wird gechunked und im Hintergrund verarbeitet.">
+            <x-ui-panel title="Audio aufnehmen" subtitle="Lange Meetings sind ok — direkter Upload an AssemblyAI inkl. Sprechererkennung.">
                 <div class="px-6 py-10 flex flex-col items-center justify-center gap-5"
                      wire:ignore
                      x-data="{
@@ -48,6 +48,7 @@
                         chunks: [],
                         stream: null,
                         startedAt: null,
+                        accumulated: 0,
                         elapsed: 0,
                         timer: null,
                         uploadUrl: '{{ route('whisper.upload') }}',
@@ -89,11 +90,29 @@
                             // damit auch lange Aufnahmen sauber als Blob enden.
                             this.mediaRecorder.start(1000);
                             this.state = 'recording';
+                            this.accumulated = 0;
                             this.startedAt = Date.now();
                             this.elapsed = 0;
                             this.timer = setInterval(() => {
-                                this.elapsed = Math.floor((Date.now() - this.startedAt) / 1000);
+                                if (this.state === 'recording') {
+                                    this.elapsed = this.accumulated + Math.floor((Date.now() - this.startedAt) / 1000);
+                                }
                             }, 250);
+                        },
+                        pause() {
+                            if (this.mediaRecorder && this.mediaRecorder.state === 'recording') {
+                                this.mediaRecorder.pause();
+                                this.accumulated += Math.floor((Date.now() - this.startedAt) / 1000);
+                                this.elapsed = this.accumulated;
+                                this.state = 'paused';
+                            }
+                        },
+                        resume() {
+                            if (this.mediaRecorder && this.mediaRecorder.state === 'paused') {
+                                this.mediaRecorder.resume();
+                                this.startedAt = Date.now();
+                                this.state = 'recording';
+                            }
                         },
                         stop() {
                             if (this.timer) { clearInterval(this.timer); this.timer = null; }
@@ -183,8 +202,35 @@
                         </div>
                         <div class="text-center">
                             <div class="text-3xl font-mono font-semibold text-rose-600 tracking-wider" x-text="formatElapsed()"></div>
-                            <div class="text-xs text-[var(--ui-muted)] mt-1">Klicke zum Stoppen</div>
+                            <div class="text-xs text-[var(--ui-muted)] mt-1">Stoppen beendet die Aufnahme</div>
                         </div>
+                        <button type="button"
+                                @click="pause()"
+                                class="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-amber-300 bg-amber-50 text-amber-800 text-sm font-medium hover:bg-amber-100 transition focus:outline-none focus:ring-2 focus:ring-amber-300">
+                            @svg('heroicon-s-pause', 'w-4 h-4')
+                            Pause
+                        </button>
+                    </div>
+
+                    {{-- Paused state --}}
+                    <div x-show="state === 'paused'" class="flex flex-col items-center gap-4">
+                        <button type="button"
+                                @click="resume()"
+                                aria-label="Aufnahme fortsetzen"
+                                style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); box-shadow: 0 10px 30px -8px rgba(217, 119, 6, 0.55), 0 0 0 1px rgba(255,255,255,0.06) inset;"
+                                class="relative inline-flex items-center justify-center w-28 h-28 rounded-full text-white transition-transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-4 focus:ring-amber-300">
+                            @svg('heroicon-s-play', 'w-12 h-12 ml-1')
+                        </button>
+                        <div class="text-center">
+                            <div class="text-3xl font-mono font-semibold text-amber-600 tracking-wider" x-text="formatElapsed()"></div>
+                            <div class="text-xs text-[var(--ui-muted)] mt-1">Pausiert · Klicke zum Fortsetzen</div>
+                        </div>
+                        <button type="button"
+                                @click="stop()"
+                                class="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-rose-300 bg-rose-50 text-rose-800 text-sm font-medium hover:bg-rose-100 transition focus:outline-none focus:ring-2 focus:ring-rose-300">
+                            @svg('heroicon-s-stop', 'w-4 h-4')
+                            Aufnahme beenden
+                        </button>
                     </div>
 
                     {{-- Uploading / processing --}}

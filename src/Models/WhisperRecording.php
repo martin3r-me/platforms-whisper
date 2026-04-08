@@ -27,6 +27,7 @@ class WhisperRecording extends Model
         'summary',
         'segments',
         'speakers_count',
+        'speaker_map',
         'language',
         'duration_seconds',
         'file_size_bytes',
@@ -41,6 +42,7 @@ class WhisperRecording extends Model
         'file_size_bytes' => 'integer',
         'speakers_count' => 'integer',
         'segments' => 'array',
+        'speaker_map' => 'array',
     ];
 
     protected static function booted(): void
