@@ -14,9 +14,86 @@
             {{-- Recorder Panel --}}
             <x-ui-panel title="Audio aufnehmen" subtitle="Sprich los — Whisper transkribiert deine Aufnahme.">
                 <div class="p-6 d-flex flex-col items-center gap-4"
-                     x-data="whisperRecorder()"
-                     x-init="init()"
-                     wire:ignore>
+                     wire:ignore
+                     x-data="{
+                        state: 'idle',
+                        error: null,
+                        mediaRecorder: null,
+                        chunks: [],
+                        stream: null,
+                        startedAt: null,
+                        elapsed: 0,
+                        timer: null,
+                        uploadUrl: '{{ route('whisper.upload') }}',
+                        init() {
+                            if (!navigator.mediaDevices || !window.MediaRecorder) {
+                                this.error = 'Dein Browser unterstützt keine Audioaufnahme.';
+                            }
+                        },
+                        async start() {
+                            this.error = null;
+                            try {
+                                this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                            } catch (e) {
+                                this.error = 'Mikrofon-Zugriff verweigert: ' + e.message;
+                                return;
+                            }
+                            this.chunks = [];
+                            const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+                                ? 'audio/webm;codecs=opus'
+                                : (MediaRecorder.isTypeSupported('audio/webm') ? 'audio/webm' : '');
+                            this.mediaRecorder = mime ? new MediaRecorder(this.stream, { mimeType: mime }) : new MediaRecorder(this.stream);
+                            this.mediaRecorder.addEventListener('dataavailable', (e) => {
+                                if (e.data && e.data.size > 0) this.chunks.push(e.data);
+                            });
+                            this.mediaRecorder.addEventListener('stop', () => this.upload());
+                            this.mediaRecorder.start();
+                            this.state = 'recording';
+                            this.startedAt = Date.now();
+                            this.elapsed = 0;
+                            this.timer = setInterval(() => {
+                                this.elapsed = Math.floor((Date.now() - this.startedAt) / 1000);
+                            }, 250);
+                        },
+                        stop() {
+                            if (this.timer) { clearInterval(this.timer); this.timer = null; }
+                            if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+                                this.mediaRecorder.stop();
+                            }
+                            if (this.stream) {
+                                this.stream.getTracks().forEach(t => t.stop());
+                            }
+                            this.state = 'uploading';
+                        },
+                        async upload() {
+                            const blob = new Blob(this.chunks, { type: 'audio/webm' });
+                            const fd = new FormData();
+                            fd.append('audio', blob, 'audio.webm');
+                            const csrf = document.querySelector('meta[name=&quot;csrf-token&quot;]')?.getAttribute('content');
+                            try {
+                                const res = await fetch(this.uploadUrl, {
+                                    method: 'POST',
+                                    headers: { 'X-CSRF-TOKEN': csrf, 'Accept': 'application/json' },
+                                    body: fd,
+                                });
+                                const data = await res.json().catch(() => ({}));
+                                if (!res.ok) throw new Error(data.error || ('HTTP ' + res.status));
+                                this.state = 'idle';
+                                this.chunks = [];
+                                if (window.Livewire) window.Livewire.dispatch('recording-saved');
+                            } catch (e) {
+                                this.error = 'Upload fehlgeschlagen: ' + e.message;
+                                this.state = 'idle';
+                                this.chunks = [];
+                            }
+                        },
+                        formatElapsed() {
+                            const m = Math.floor(this.elapsed / 60).toString().padStart(2, '0');
+                            const s = (this.elapsed % 60).toString().padStart(2, '0');
+                            return m + ':' + s;
+                        },
+                     }"
+                     x-init="init()">
 
                     {{-- Status indicator --}}
                     <template x-if="error">
@@ -140,109 +217,4 @@
         </x-ui-page-sidebar>
     </x-slot>
 
-    @push('scripts')
-    <script>
-        function whisperRecorder() {
-            return {
-                state: 'idle', // idle | recording | uploading
-                error: null,
-                mediaRecorder: null,
-                chunks: [],
-                stream: null,
-                startedAt: null,
-                elapsed: 0,
-                timer: null,
-
-                init() {
-                    if (!navigator.mediaDevices || !window.MediaRecorder) {
-                        this.error = 'Dein Browser unterstützt keine Audioaufnahme.';
-                    }
-                },
-
-                async start() {
-                    this.error = null;
-                    try {
-                        this.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                    } catch (e) {
-                        this.error = 'Mikrofon-Zugriff verweigert: ' + e.message;
-                        return;
-                    }
-
-                    this.chunks = [];
-                    const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-                        ? 'audio/webm;codecs=opus'
-                        : 'audio/webm';
-                    this.mediaRecorder = new MediaRecorder(this.stream, { mimeType: mime });
-
-                    this.mediaRecorder.addEventListener('dataavailable', (e) => {
-                        if (e.data && e.data.size > 0) this.chunks.push(e.data);
-                    });
-
-                    this.mediaRecorder.addEventListener('stop', () => this.upload());
-
-                    this.mediaRecorder.start();
-                    this.state = 'recording';
-                    this.startedAt = Date.now();
-                    this.elapsed = 0;
-                    this.timer = setInterval(() => {
-                        this.elapsed = Math.floor((Date.now() - this.startedAt) / 1000);
-                    }, 250);
-                },
-
-                stop() {
-                    if (this.timer) {
-                        clearInterval(this.timer);
-                        this.timer = null;
-                    }
-                    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
-                        this.mediaRecorder.stop();
-                    }
-                    if (this.stream) {
-                        this.stream.getTracks().forEach(t => t.stop());
-                    }
-                    this.state = 'uploading';
-                },
-
-                async upload() {
-                    const blob = new Blob(this.chunks, { type: 'audio/webm' });
-                    const fd = new FormData();
-                    fd.append('audio', blob, 'audio.webm');
-
-                    const csrf = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content');
-
-                    try {
-                        const res = await fetch('{{ route('whisper.upload') }}', {
-                            method: 'POST',
-                            headers: {
-                                'X-CSRF-TOKEN': csrf,
-                                'Accept': 'application/json',
-                            },
-                            body: fd,
-                        });
-
-                        const data = await res.json().catch(() => ({}));
-
-                        if (!res.ok) {
-                            throw new Error(data.error || ('HTTP ' + res.status));
-                        }
-
-                        this.state = 'idle';
-                        this.chunks = [];
-                        Livewire.dispatch('recording-saved');
-                    } catch (e) {
-                        this.error = 'Upload fehlgeschlagen: ' + e.message;
-                        this.state = 'idle';
-                        this.chunks = [];
-                    }
-                },
-
-                formatElapsed() {
-                    const m = Math.floor(this.elapsed / 60).toString().padStart(2, '0');
-                    const s = (this.elapsed % 60).toString().padStart(2, '0');
-                    return m + ':' + s;
-                },
-            }
-        }
-    </script>
-    @endpush
 </x-ui-page>
