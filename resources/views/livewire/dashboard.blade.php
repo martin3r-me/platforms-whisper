@@ -38,7 +38,7 @@
 
             {{-- Recorder Panel --}}
             <x-ui-panel title="Audio aufnehmen" subtitle="Lange Meetings sind ok — Aufnahme wird gechunked und im Hintergrund verarbeitet.">
-                <div class="p-6 d-flex flex-col items-center gap-4"
+                <div class="px-6 py-10 flex flex-col items-center justify-center gap-5"
                      wire:ignore
                      x-data="{
                         state: 'idle',
@@ -147,39 +147,55 @@
 
                     {{-- Status indicator --}}
                     <template x-if="error">
-                        <div class="w-full p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm" x-text="error"></div>
+                        <div class="w-full max-w-md p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm text-center" x-text="error"></div>
                     </template>
                     <template x-if="info">
-                        <div class="w-full p-3 rounded-lg bg-blue-50 border border-blue-200 text-blue-700 text-sm" x-text="info"></div>
+                        <div class="w-full max-w-md p-3 rounded-lg bg-sky-50 border border-sky-200 text-sky-700 text-sm text-center" x-text="info"></div>
                     </template>
 
                     {{-- Idle state --}}
-                    <div x-show="state === 'idle'" class="d-flex flex-col items-center gap-3">
+                    <div x-show="state === 'idle'" class="flex flex-col items-center gap-4">
                         <button type="button"
                                 @click="start()"
-                                class="d-flex items-center justify-center w-24 h-24 rounded-full bg-red-600 hover:bg-red-700 text-white shadow-lg transition">
-                            @svg('heroicon-o-microphone', 'w-12 h-12')
+                                aria-label="Aufnahme starten"
+                                style="background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); box-shadow: 0 10px 30px -8px rgba(220, 38, 38, 0.55), 0 0 0 1px rgba(255,255,255,0.06) inset;"
+                                class="group relative inline-flex items-center justify-center w-28 h-28 rounded-full text-white transition-transform duration-150 hover:scale-105 active:scale-95 focus:outline-none focus:ring-4 focus:ring-rose-300">
+                            <span class="absolute inset-0 rounded-full opacity-0 group-hover:opacity-100 transition" style="background: radial-gradient(circle at 30% 30%, rgba(255,255,255,0.18), transparent 60%);"></span>
+                            @svg('heroicon-s-microphone', 'relative w-12 h-12')
                         </button>
-                        <div class="text-sm text-[var(--ui-muted)]">Klicke zum Aufnehmen</div>
+                        <div class="text-center">
+                            <div class="text-base font-medium text-[var(--ui-secondary)]">Aufnahme starten</div>
+                            <div class="text-xs text-[var(--ui-muted)] mt-0.5">Klicke den Button und sprich los</div>
+                        </div>
                     </div>
 
                     {{-- Recording state --}}
-                    <div x-show="state === 'recording'" class="d-flex flex-col items-center gap-3">
-                        <button type="button"
-                                @click="stop()"
-                                class="d-flex items-center justify-center w-24 h-24 rounded-full bg-red-600 text-white shadow-lg animate-pulse">
-                            @svg('heroicon-o-stop', 'w-12 h-12')
-                        </button>
-                        <div class="text-2xl font-mono text-red-600" x-text="formatElapsed()"></div>
-                        <div class="text-sm text-[var(--ui-muted)]">Klicke zum Stoppen</div>
+                    <div x-show="state === 'recording'" class="flex flex-col items-center gap-4">
+                        <div class="relative inline-flex items-center justify-center">
+                            <span class="absolute inline-flex w-32 h-32 rounded-full bg-rose-500/30 animate-ping"></span>
+                            <button type="button"
+                                    @click="stop()"
+                                    aria-label="Aufnahme stoppen"
+                                    style="background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); box-shadow: 0 10px 30px -8px rgba(185, 28, 28, 0.65), 0 0 0 1px rgba(255,255,255,0.08) inset;"
+                                    class="relative inline-flex items-center justify-center w-28 h-28 rounded-full text-white transition-transform hover:scale-105 active:scale-95 focus:outline-none focus:ring-4 focus:ring-rose-300">
+                                @svg('heroicon-s-stop', 'w-12 h-12')
+                            </button>
+                        </div>
+                        <div class="text-center">
+                            <div class="text-3xl font-mono font-semibold text-rose-600 tracking-wider" x-text="formatElapsed()"></div>
+                            <div class="text-xs text-[var(--ui-muted)] mt-1">Klicke zum Stoppen</div>
+                        </div>
                     </div>
 
                     {{-- Uploading / processing --}}
-                    <div x-show="state === 'uploading'" class="d-flex flex-col items-center gap-3">
-                        <div class="d-flex items-center justify-center w-24 h-24 rounded-full bg-[var(--ui-muted-5)]">
+                    <div x-show="state === 'uploading'" class="flex flex-col items-center gap-4">
+                        <div class="inline-flex items-center justify-center w-28 h-28 rounded-full bg-[var(--ui-muted-5)] border border-[var(--ui-border)]">
                             @svg('heroicon-o-arrow-path', 'w-12 h-12 text-[var(--ui-secondary)] animate-spin')
                         </div>
-                        <div class="text-sm text-[var(--ui-muted)]">Lade hoch und stelle Job in die Queue…</div>
+                        <div class="text-center">
+                            <div class="text-base font-medium text-[var(--ui-secondary)]">Lade hoch …</div>
+                            <div class="text-xs text-[var(--ui-muted)] mt-0.5">Job wird in die Queue gestellt</div>
+                        </div>
                     </div>
                 </div>
             </x-ui-panel>
