@@ -2,6 +2,7 @@
 
 namespace Platform\Whisper;
 
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -20,6 +21,11 @@ class WhisperServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // Morph-Map-Alias für Organization-Verknüpfungen
+        Relation::morphMap([
+            'whisper_recording' => \Platform\Whisper\Models\WhisperRecording::class,
+        ]);
+
         if (
             config()->has('whisper.routing') &&
             config()->has('whisper.navigation') &&
@@ -65,6 +71,8 @@ class WhisperServiceProvider extends ServiceProvider
             $registry->register(new \Platform\Whisper\Tools\DeleteRecordingTool());
             $registry->register(new \Platform\Whisper\Tools\SearchRecordingsTool());
             $registry->register(new \Platform\Whisper\Tools\GetTranscriptTool());
+            $registry->register(new \Platform\Whisper\Tools\LinkRecordingToEntityTool());
+            $registry->register(new \Platform\Whisper\Tools\UnlinkRecordingFromEntityTool());
         } catch (\Throwable $e) {
             \Log::warning('Whisper: Tool-Registrierung fehlgeschlagen', ['error' => $e->getMessage()]);
         }

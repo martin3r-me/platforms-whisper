@@ -9,18 +9,18 @@ use Platform\Core\Contracts\ToolResult;
 use Platform\Whisper\Models\WhisperRecording;
 use Platform\Whisper\Tools\Concerns\ResolvesWhisperTeam;
 
-class GetRecordingTool implements ToolContract, ToolMetadataContract
+class UnlinkRecordingFromEntityTool implements ToolContract, ToolMetadataContract
 {
     use ResolvesWhisperTeam;
 
     public function getName(): string
     {
-        return 'whisper.recording.GET';
+        return 'whisper.recording.link.DELETE';
     }
 
     public function getDescription(): string
     {
-        return 'GET /whisper/recording - Liefert eine einzelne Aufnahme inkl. Metadaten und Transkript. ERFORDERLICH: recording_id. Optional: team_id.';
+        return 'DELETE /whisper/recording/link - Entfernt die Verknuepfung einer Aufnahme zu ihrer Organization-Entity. ERFORDERLICH: recording_id.';
     }
 
     public function getSchema(): array
@@ -55,52 +55,34 @@ class GetRecordingTool implements ToolContract, ToolMetadataContract
                 return ToolResult::error('VALIDATION_ERROR', 'recording_id ist erforderlich.');
             }
 
-            $rec = WhisperRecording::query()
+            $recording = WhisperRecording::query()
                 ->where('team_id', $teamId)
                 ->find($recordingId);
-
-            if (!$rec) {
+            if (!$recording) {
                 return ToolResult::error('NOT_FOUND', 'Aufnahme nicht gefunden (oder kein Zugriff).');
             }
 
-            $entity = $rec->getOrganizationEntity();
+            $deleted = $recording->detachOrganizationContext();
 
             return ToolResult::success([
-                'id' => $rec->id,
-                'uuid' => $rec->uuid,
-                'title' => $rec->title,
-                'transcript' => $rec->transcript,
-                'language' => $rec->language,
-                'duration_seconds' => $rec->duration_seconds,
-                'model' => $rec->model,
-                'status' => $rec->status,
-                'error_message' => $rec->error_message,
-                'chunks_total' => $rec->chunks_total,
-                'chunks_done' => $rec->chunks_done,
-                'progress_percent' => $rec->progressPercent(),
-                'file_size_bytes' => $rec->file_size_bytes,
-                'team_id' => $rec->team_id,
-                'created_by_user_id' => $rec->created_by_user_id,
-                'organization_entity' => $entity ? [
-                    'id' => $entity->id,
-                    'name' => $entity->name,
-                    'type' => $entity->type?->name,
-                ] : null,
-                'created_at' => $rec->created_at?->toISOString(),
-                'updated_at' => $rec->updated_at?->toISOString(),
+                'recording_id' => $recording->id,
+                'detached' => (bool) $deleted,
+                'message' => $deleted
+                    ? "Verknuepfung der Aufnahme '{$recording->title}' entfernt."
+                    : 'Aufnahme war nicht mit einer Entity verknuepft.',
             ]);
         } catch (\Throwable $e) {
-            return ToolResult::error('EXECUTION_ERROR', 'Fehler beim Laden der Aufnahme: ' . $e->getMessage());
+            return ToolResult::error('EXECUTION_ERROR', 'Fehler beim Entfernen der Verknuepfung: ' . $e->getMessage());
         }
     }
 
     public function getMetadata(): array
     {
         return [
-            'read_only' => true,
-            'category' => 'read',
-            'tags' => ['whisper', 'recording', 'get'],
-            'risk_level' => 'safe',
+            'read_only' => false,
+            'category' => 'action',
+            'tags' => ['whisper', 'recording', 'organization', 'unlink'],
+            'risk_level' => 'write',
             'requires_auth' => true,
             'requires_team' => true,
             'idempotent' => true,

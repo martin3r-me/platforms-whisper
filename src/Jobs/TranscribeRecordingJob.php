@@ -99,11 +99,21 @@ class TranscribeRecordingJob implements ShouldQueue
                 ]);
             }
 
-            $recording->update([
-                'transcript' => implode("\n\n", array_filter($transcripts)),
+            $finalTranscript = implode("\n\n", array_filter($transcripts));
+
+            $update = [
+                'transcript' => $finalTranscript,
                 'language' => $detectedLang,
                 'status' => WhisperRecording::STATUS_COMPLETED,
-            ]);
+            ];
+
+            // Auto-Title aus erstem Satz wenn Default-Titel ("Aufnahme vom ...")
+            $smartTitle = $this->generateTitle($finalTranscript);
+            if ($smartTitle && (!$recording->title || str_starts_with((string) $recording->title, 'Aufnahme vom '))) {
+                $update['title'] = $smartTitle;
+            }
+
+            $recording->update($update);
         } catch (Throwable $e) {
             Log::error('Whisper transcription job failed', [
                 'recording_id' => $this->recordingId,
@@ -138,5 +148,30 @@ class TranscribeRecordingJob implements ShouldQueue
         if (is_file($path)) {
             @unlink($path);
         }
+    }
+
+    /**
+     * Erzeugt einen kurzen Titel aus dem Transkript:
+     * Erster Satz, max. 80 Zeichen, Leerstellen-bereinigt.
+     */
+    private function generateTitle(string $transcript): ?string
+    {
+        $clean = trim(preg_replace('/\s+/u', ' ', $transcript));
+        if ($clean === '') {
+            return null;
+        }
+
+        // Ersten Satz extrahieren (Punkt, Frage-, Ausrufezeichen)
+        if (preg_match('/^(.*?[\.\!\?])(\s|$)/u', $clean, $m)) {
+            $sentence = trim($m[1]);
+        } else {
+            $sentence = $clean;
+        }
+
+        if (mb_strlen($sentence) > 80) {
+            $sentence = mb_substr($sentence, 0, 77) . '…';
+        }
+
+        return $sentence ?: null;
     }
 }
