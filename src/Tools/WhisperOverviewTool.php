@@ -63,7 +63,7 @@ class WhisperOverviewTool implements ToolContract, ToolMetadataContract
                 ],
                 'organization_link' => [
                     'morph_alias' => 'whisper_recording',
-                    'note' => 'Aufnahmen koennen mit Organization-Entities (Projekt, Kunde, Abteilung) verknuepft werden. Trait: HasOrganizationContexts. Eine Aufnahme kann nur EINE Entity haben.',
+                    'note' => 'Aufnahmen koennen mit Organization-Entities (Projekt, Kunde, Abteilung) verknuepft werden. Trait: HasOrganizationContexts. Eine Aufnahme kann nur EINE Entity haben. Verknuepfung erfolgt ueber die Tools des core/organization-Moduls (morph_alias: whisper_recording).',
                 ],
                 'related_tools' => [
                     'recordings' => [
@@ -73,10 +73,6 @@ class WhisperOverviewTool implements ToolContract, ToolMetadataContract
                         'delete' => 'whisper.recordings.DELETE',
                         'search' => 'whisper.recordings.search.GET',
                         'transcript' => 'whisper.recording.transcript.GET',
-                    ],
-                    'organization' => [
-                        'link' => 'whisper.recording.link.POST',
-                        'unlink' => 'whisper.recording.link.DELETE',
                     ],
                 ],
             ]);
