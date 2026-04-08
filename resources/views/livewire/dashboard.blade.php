@@ -227,8 +227,11 @@
                                 </a>
                                 <span class="text-xs text-[var(--ui-muted)] flex-shrink-0 hidden sm:inline">{{ $rec->created_at->format('d.m.Y H:i') }}</span>
                                 <span class="text-xs text-[var(--ui-muted)] flex-shrink-0 font-mono w-16 text-right">{{ $rec->duration_seconds ? gmdate('H:i:s', $rec->duration_seconds) : '—' }}</span>
-                                @if(in_array($rec->status, ['pending','processing']) && $rec->chunks_total)
-                                    <span class="text-xs text-[var(--ui-muted)] flex-shrink-0 w-10 text-right">{{ $rec->progressPercent() }}%</span>
+                                @if($rec->speakers_count && $rec->speakers_count > 1)
+                                    <span class="text-xs text-[var(--ui-muted)] flex-shrink-0 inline-flex items-center gap-1" title="{{ $rec->speakers_count }} Sprecher">
+                                        @svg('heroicon-o-users', 'w-3.5 h-3.5')
+                                        {{ $rec->speakers_count }}
+                                    </span>
                                 @endif
                                 <button type="button"
                                         wire:click="deleteRecording({{ $rec->id }})"

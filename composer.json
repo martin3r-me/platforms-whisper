@@ -1,6 +1,6 @@
 {
     "name": "martin3r/platforms-whisper",
-    "description": "Whisper Module for Platform - Audio Recording and Transcription via OpenAI Whisper",
+    "description": "Whisper Module for Platform - Browser audio recording with AssemblyAI transcription + speaker diarization + LLM summary",
     "type": "library",
     "license": "MIT",
     "authors": [

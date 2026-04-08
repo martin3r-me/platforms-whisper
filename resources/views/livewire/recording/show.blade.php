@@ -13,7 +13,6 @@
     <x-ui-page-container>
         @php
             $isInFlight = in_array($recording->status, ['pending', 'processing'], true);
-            $progress = $recording->progressPercent();
         @endphp
 
         <div class="space-y-6"
@@ -60,22 +59,12 @@
             {{-- Progress (während Verarbeitung) --}}
             @if($isInFlight)
                 <x-ui-panel title="Verarbeitung läuft">
-                    <div class="p-4 space-y-3">
-                        <div class="d-flex items-center justify-between text-sm">
-                            <span class="text-[var(--ui-muted)]">
-                                @if($recording->chunks_total)
-                                    Chunk {{ $recording->chunks_done ?? 0 }} von {{ $recording->chunks_total }}
-                                @else
-                                    Audio wird vorbereitet…
-                                @endif
-                            </span>
-                            <span class="font-mono">{{ $progress }}%</span>
-                        </div>
-                        <div class="w-full h-2 bg-[var(--ui-muted-5)] rounded-full overflow-hidden">
-                            <div class="h-full bg-[var(--ui-primary)] transition-all duration-500"
-                                 style="width: {{ $progress }}%"></div>
-                        </div>
-                        <div class="text-xs text-[var(--ui-muted)]">Aktualisiert sich automatisch alle 3 Sekunden.</div>
+                    <div class="p-4 flex items-center gap-3 text-sm text-[var(--ui-muted)]">
+                        <svg class="animate-spin h-4 w-4 text-[var(--ui-primary)]" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
+                        </svg>
+                        <span>Audio wird transkribiert… Die Seite aktualisiert sich automatisch alle 3 Sekunden.</span>
                     </div>
                 </x-ui-panel>
             @endif
@@ -90,7 +79,7 @@
             @endif
 
             {{-- Transcript --}}
-            <x-ui-panel title="Transkript">
+            <x-ui-panel :title="$recording->speakers_count > 1 ? 'Transkript · '.$recording->speakers_count.' Sprecher' : 'Transkript'">
                 <div class="p-4">
                     @if($recording->status === 'failed')
                         <div class="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
@@ -98,11 +87,43 @@
                         </div>
                     @elseif(!$recording->transcript && $isInFlight)
                         <div class="p-3 rounded-lg bg-[var(--ui-muted-5)] text-[var(--ui-muted)] text-sm">
-                            Transkription läuft… Erste Ergebnisse erscheinen hier sobald der erste Chunk fertig ist.
+                            Transkription läuft… Die Verarbeitung kann je nach Länge einen Moment dauern.
                         </div>
                     @else
-                        <div x-data="{ copied: false }" class="space-y-3">
-                            <div class="d-flex justify-end">
+                        @php
+                            $segments = is_array($recording->segments) ? $recording->segments : [];
+                            $hasSegments = count($segments) > 0;
+                            // Stabile Farben pro Sprecher (rotierend)
+                            $speakerPalette = ['sky', 'emerald', 'violet', 'amber', 'rose', 'cyan', 'lime', 'fuchsia'];
+                            $speakerIndex = [];
+                            foreach ($segments as $seg) {
+                                $sp = $seg['speaker'] ?? 'A';
+                                if (!isset($speakerIndex[$sp])) {
+                                    $speakerIndex[$sp] = count($speakerIndex);
+                                }
+                            }
+                        @endphp
+                        <div x-data="{ copied: false, view: '{{ $hasSegments ? 'speakers' : 'plain' }}' }" class="space-y-3">
+                            <div class="flex items-center justify-between">
+                                @if($hasSegments)
+                                    <div class="inline-flex rounded-md border border-[var(--ui-border)] overflow-hidden text-xs">
+                                        <button type="button"
+                                                class="px-3 py-1 transition"
+                                                :class="view === 'speakers' ? 'bg-[var(--ui-primary)] text-white' : 'bg-transparent text-[var(--ui-muted)] hover:bg-[var(--ui-muted-5)]'"
+                                                @click="view = 'speakers'">
+                                            Sprecher
+                                        </button>
+                                        <button type="button"
+                                                class="px-3 py-1 transition"
+                                                :class="view === 'plain' ? 'bg-[var(--ui-primary)] text-white' : 'bg-transparent text-[var(--ui-muted)] hover:bg-[var(--ui-muted-5)]'"
+                                                @click="view = 'plain'">
+                                            Fließtext
+                                        </button>
+                                    </div>
+                                @else
+                                    <div></div>
+                                @endif
+
                                 <x-ui-button
                                     variant="secondary"
                                     size="sm"
@@ -111,8 +132,35 @@
                                     <span x-show="copied">Kopiert!</span>
                                 </x-ui-button>
                             </div>
-                            <div x-ref="transcript"
-                                 class="whitespace-pre-wrap text-sm leading-relaxed p-4 bg-[var(--ui-muted-5)] rounded-lg border border-[var(--ui-border)]">{{ $recording->transcript ?: '—' }}</div>
+
+                            {{-- Sprecher-Ansicht --}}
+                            @if($hasSegments)
+                                <div x-show="view === 'speakers'" x-ref="transcript" class="space-y-3">
+                                    @foreach($segments as $seg)
+                                        @php
+                                            $sp = $seg['speaker'] ?? 'A';
+                                            $paletteKey = $speakerPalette[$speakerIndex[$sp] % count($speakerPalette)];
+                                            $start = (int) floor((float) ($seg['start'] ?? 0));
+                                            $mm = str_pad((string) intdiv($start, 60), 2, '0', STR_PAD_LEFT);
+                                            $ss = str_pad((string) ($start % 60), 2, '0', STR_PAD_LEFT);
+                                        @endphp
+                                        <div class="flex gap-3 p-3 rounded-lg bg-{{ $paletteKey }}-50 border border-{{ $paletteKey }}-200">
+                                            <div class="flex-shrink-0 flex flex-col items-center min-w-[3.5rem]">
+                                                <span class="inline-flex items-center justify-center w-9 h-9 rounded-full bg-{{ $paletteKey }}-500 text-white text-xs font-bold">
+                                                    {{ $sp }}
+                                                </span>
+                                                <span class="mt-1 text-[10px] font-mono text-{{ $paletteKey }}-700">{{ $mm }}:{{ $ss }}</span>
+                                            </div>
+                                            <div class="flex-1 text-sm leading-relaxed text-[var(--ui-fg)] whitespace-pre-wrap">{{ $seg['text'] ?? '' }}</div>
+                                        </div>
+                                    @endforeach
+                                </div>
+                                <div x-show="view === 'plain'"
+                                     class="whitespace-pre-wrap text-sm leading-relaxed p-4 bg-[var(--ui-muted-5)] rounded-lg border border-[var(--ui-border)]">{{ $recording->transcript ?: '—' }}</div>
+                            @else
+                                <div x-ref="transcript"
+                                     class="whitespace-pre-wrap text-sm leading-relaxed p-4 bg-[var(--ui-muted-5)] rounded-lg border border-[var(--ui-border)]">{{ $recording->transcript ?: '—' }}</div>
+                            @endif
                         </div>
                     @endif
                 </div>

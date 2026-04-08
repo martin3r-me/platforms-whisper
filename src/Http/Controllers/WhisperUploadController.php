@@ -58,7 +58,7 @@ class WhisperUploadController extends Controller
                 'created_by_user_id' => $user->id,
                 'title' => 'Aufnahme vom ' . now()->format('d.m.Y H:i'),
                 'status' => WhisperRecording::STATUS_PENDING,
-                'model' => 'whisper-1',
+                'model' => 'assemblyai',
                 'file_size_bytes' => $sizeBytes,
             ]);
 

@@ -25,30 +25,23 @@ class WhisperRecording extends Model
         'title',
         'transcript',
         'summary',
+        'segments',
+        'speakers_count',
         'language',
         'duration_seconds',
-        'chunks_total',
-        'chunks_done',
         'file_size_bytes',
         'model',
+        'provider_id',
         'status',
         'error_message',
     ];
 
     protected $casts = [
         'duration_seconds' => 'integer',
-        'chunks_total' => 'integer',
-        'chunks_done' => 'integer',
         'file_size_bytes' => 'integer',
+        'speakers_count' => 'integer',
+        'segments' => 'array',
     ];
-
-    public function progressPercent(): int
-    {
-        if (!$this->chunks_total || $this->chunks_total <= 0) {
-            return $this->status === self::STATUS_COMPLETED ? 100 : 0;
-        }
-        return (int) round(($this->chunks_done / $this->chunks_total) * 100);
-    }
 
     protected static function booted(): void
     {

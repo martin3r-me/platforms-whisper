@@ -16,7 +16,7 @@ class WhisperOverviewTool implements ToolContract, ToolMetadataContract
 
     public function getDescription(): string
     {
-        return 'GET /whisper/overview - Zeigt Uebersicht ueber das Whisper-Modul (Konzepte, Datenmodell, verfuegbare Tools). Whisper ist ein Audio-Transkriptions-Modul: Browser-Recorder -> OpenAI Whisper -> Transkript. Audio wird nicht persistiert.';
+        return 'GET /whisper/overview - Zeigt Uebersicht ueber das Whisper-Modul (Konzepte, Datenmodell, verfuegbare Tools). Whisper ist ein Audio-Transkriptions-Modul: Browser-Recorder -> AssemblyAI (Transcript + Speaker Diarization) -> LLM-Summary. Audio wird nicht persistiert.';
     }
 
     public function getSchema(): array
@@ -43,23 +43,35 @@ class WhisperOverviewTool implements ToolContract, ToolMetadataContract
                         'table' => 'whisper_recordings',
                         'key_fields' => [
                             'id', 'uuid', 'team_id', 'created_by_user_id',
-                            'title', 'transcript', 'summary', 'language', 'duration_seconds',
-                            'model', 'status', 'error_message',
-                            'chunks_total', 'chunks_done', 'file_size_bytes',
+                            'title', 'transcript', 'summary',
+                            'segments', 'speakers_count',
+                            'language', 'duration_seconds',
+                            'model', 'provider_id', 'status', 'error_message',
+                            'file_size_bytes',
                         ],
-                        'note' => 'Audio-Aufnahme wird im Browser via MediaRecorder erstellt, an OpenAI Whisper transkribiert und nur das Transkript persistiert. Audio-Datei wird nach Verarbeitung verworfen. Nach der Transkription erzeugt ein LLM automatisch Titel und Kurz-Zusammenfassung (Bullet-Points).',
+                        'note' => 'Audio-Aufnahme wird im Browser via MediaRecorder erstellt, an AssemblyAI gesendet (Transcription + Speaker Diarization). Nur Transkript, Sprecher-Segmente und LLM-Summary werden persistiert. Audio-Datei wird nach Verarbeitung verworfen.',
                     ],
                 ],
                 'status_funnel' => [
                     'pending' => 'Aufnahme hochgeladen, Job in Queue.',
-                    'processing' => 'Job laeuft - ggf. Chunking + sequenzielle Whisper-Calls.',
-                    'completed' => 'Transkript fertig.',
+                    'processing' => 'Upload zu AssemblyAI, Polling bis fertig.',
+                    'completed' => 'Transkript fertig, inkl. Sprecher-Segmente und Summary.',
                     'failed' => 'Fehler waehrend Verarbeitung. error_message enthaelt Details.',
                 ],
                 'features' => [
-                    'long_meetings' => 'Aufnahmen >20 MB werden serverseitig per ffmpeg in 10-Minuten-Chunks geteilt und sequenziell transkribiert. Progress via chunks_done/chunks_total.',
+                    'speaker_diarization' => 'AssemblyAI liefert speaker_labels; Segmente mit speaker/start/end/text landen in Spalte segments. speakers_count zaehlt die erkannten Sprecher.',
+                    'llm_summary' => 'Nach Transkription generiert WhisperSummaryService via OpenAI einen praegnanten Titel (max 70 Zeichen) und Bullet-Point-Summary.',
                     'queue_based' => 'Upload kehrt sofort zurueck, TranscribeRecordingJob verarbeitet im Hintergrund (timeout 1800s).',
-                    'audio_discarded' => 'Audio-Datei wird nach Transkription geloescht. Nur Transkript bleibt persistent.',
+                    'audio_discarded' => 'Audio-Datei wird nach Transkription geloescht. Nur Transkript + Segmente bleiben persistent.',
+                ],
+                'segments_schema' => [
+                    'type' => 'array<object>',
+                    'item' => [
+                        'speaker' => 'A, B, C... (AssemblyAI labels)',
+                        'start' => 'float seconds',
+                        'end' => 'float seconds',
+                        'text' => 'string',
+                    ],
                 ],
                 'organization_link' => [
                     'morph_alias' => 'whisper_recording',

@@ -9,9 +9,8 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Platform\Whisper\Models\WhisperRecording;
-use Platform\Whisper\Services\WhisperAudioChunkerService;
+use Platform\Whisper\Services\AssemblyAiTranscriptionService;
 use Platform\Whisper\Services\WhisperSummaryService;
-use Platform\Whisper\Services\WhisperTranscriptionService;
 use Throwable;
 
 class TranscribeRecordingJob implements ShouldQueue
@@ -32,85 +31,44 @@ class TranscribeRecordingJob implements ShouldQueue
     }
 
     public function handle(
-        WhisperTranscriptionService $whisper,
-        WhisperAudioChunkerService $chunker,
+        AssemblyAiTranscriptionService $transcription,
         WhisperSummaryService $summarizer
-    ): void
-    {
+    ): void {
         $recording = WhisperRecording::find($this->recordingId);
         if (!$recording) {
             $this->safeUnlink($this->audioPath);
             return;
         }
 
-        $tmpDir = null;
-
         try {
             $recording->update(['status' => WhisperRecording::STATUS_PROCESSING]);
 
-            // Duration ermitteln
-            $duration = $chunker->getDuration($this->audioPath);
-            if ($duration) {
-                $recording->update(['duration_seconds' => (int) round($duration)]);
-            }
+            $result = $transcription->transcribe(
+                $this->audioPath,
+                basename($this->audioPath),
+                $this->language === 'auto' ? null : $this->language,
+                (bool) config('whisper.assemblyai.speaker_labels', true)
+            );
 
-            $maxBytes = (int) config('whisper.chunk_threshold_bytes', 20 * 1024 * 1024);
-            $segmentSeconds = (int) config('whisper.segment_seconds', 600);
-
-            $fileSize = @filesize($this->audioPath) ?: 0;
-            $needsChunking = $fileSize > $maxBytes;
-
-            if ($needsChunking) {
-                $result = $chunker->chunk($this->audioPath, $segmentSeconds);
-                $chunks = $result['files'];
-                $tmpDir = $result['tmp_dir'];
-            } else {
-                // Single chunk: trotzdem komprimieren wenn größer als ~10 MB
-                if ($fileSize > 10 * 1024 * 1024) {
-                    $compressed = $chunker->compress($this->audioPath);
-                    $chunks = [$compressed];
-                    $tmpDir = dirname($compressed);
-                } else {
-                    $chunks = [$this->audioPath];
-                }
-            }
-
-            $recording->update([
-                'chunks_total' => count($chunks),
-                'chunks_done' => 0,
-            ]);
-
-            $transcripts = [];
-            $detectedLang = null;
-
-            foreach ($chunks as $idx => $chunkPath) {
-                $result = $whisper->transcribe(
-                    $chunkPath,
-                    'audio_' . str_pad((string) $idx, 3, '0', STR_PAD_LEFT) . '.ogg',
-                    $this->language
-                );
-
-                $transcripts[] = trim((string) $result['transcript']);
-
-                if (!$detectedLang && !empty($result['language'])) {
-                    $detectedLang = $result['language'];
-                }
-
-                // Inkrementeller Fortschritt → UI-Polling sieht es live
-                $recording->update([
-                    'chunks_done' => $idx + 1,
-                    'transcript' => implode("\n\n", array_filter($transcripts)),
-                    'language' => $detectedLang,
-                ]);
-            }
-
-            $finalTranscript = implode("\n\n", array_filter($transcripts));
+            $finalTranscript = (string) ($result['transcript'] ?? '');
+            $segments = $result['segments'] ?? [];
+            $speakersCount = (int) ($result['speakers_count'] ?? 0);
+            $detectedLang = $result['language'] ?? null;
+            $duration = $result['duration'] ?? null;
 
             $update = [
                 'transcript' => $finalTranscript,
+                'segments' => !empty($segments) ? $segments : null,
+                'speakers_count' => $speakersCount > 0 ? $speakersCount : null,
                 'language' => $detectedLang,
                 'status' => WhisperRecording::STATUS_COMPLETED,
+                'model' => $result['model'] ?? $recording->model,
+                'provider_id' => $result['provider_id'] ?? null,
             ];
+
+            if ($duration !== null) {
+                $update['duration_seconds'] = (int) round((float) $duration);
+            }
 
             // LLM-Zusammenfassung: Titel + Summary
             $llm = $summarizer->summarize($finalTranscript, $detectedLang ?? $this->language);
@@ -121,7 +79,6 @@ class TranscribeRecordingJob implements ShouldQueue
                 if (!empty($llm['title'])) {
                     $update['title'] = $llm['title'];
                 } else {
-                    // Fallback: erster Satz
                     $fallback = $this->generateTitle($finalTranscript);
                     if ($fallback) {
                         $update['title'] = $fallback;
@@ -146,9 +103,6 @@ class TranscribeRecordingJob implements ShouldQueue
                 'error_message' => mb_substr($e->getMessage(), 0, 1000),
             ]);
         } finally {
-            if ($tmpDir) {
-                $chunker->cleanup($tmpDir);
-            }
             $this->safeUnlink($this->audioPath);
         }
     }
@@ -171,8 +125,7 @@ class TranscribeRecordingJob implements ShouldQueue
     }
 
     /**
-     * Erzeugt einen kurzen Titel aus dem Transkript:
-     * Erster Satz, max. 80 Zeichen, Leerstellen-bereinigt.
+     * Fallback-Titel aus dem Transkript: erster Satz, max. 80 Zeichen.
      */
     private function generateTitle(string $transcript): ?string
     {
@@ -181,7 +134,6 @@ class TranscribeRecordingJob implements ShouldQueue
             return null;
         }
 
-        // Ersten Satz extrahieren (Punkt, Frage-, Ausrufezeichen)
         if (preg_match('/^(.*?[\.\!\?])(\s|$)/u', $clean, $m)) {
             $sentence = trim($m[1]);
         } else {

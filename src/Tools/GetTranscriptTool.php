@@ -75,6 +75,8 @@ class GetTranscriptTool implements ToolContract, ToolMetadataContract
                 'transcript' => $rec->transcript,
                 'transcript_length' => mb_strlen((string) $rec->transcript),
                 'summary' => $rec->summary,
+                'segments' => $rec->segments,
+                'speakers_count' => $rec->speakers_count,
             ]);
         } catch (\Throwable $e) {
             return ToolResult::error('EXECUTION_ERROR', 'Fehler beim Laden des Transkripts: ' . $e->getMessage());
