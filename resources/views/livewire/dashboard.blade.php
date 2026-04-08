@@ -16,6 +16,26 @@
 
         <div class="space-y-6"
              @if($hasInFlight) wire:poll.5s @endif>
+            {{-- Stats --}}
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="p-4 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-muted-5)]">
+                    <div class="text-xs uppercase text-[var(--ui-muted)] mb-1">Aufnahmen</div>
+                    <div class="text-2xl font-semibold text-[var(--ui-secondary)]">{{ $stats['total'] }}</div>
+                </div>
+                <div class="p-4 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-muted-5)]">
+                    <div class="text-xs uppercase text-[var(--ui-muted)] mb-1">Fertig</div>
+                    <div class="text-2xl font-semibold text-emerald-600">{{ $stats['completed'] }}</div>
+                </div>
+                <div class="p-4 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-muted-5)]">
+                    <div class="text-xs uppercase text-[var(--ui-muted)] mb-1">In Verarbeitung</div>
+                    <div class="text-2xl font-semibold text-blue-600">{{ $stats['in_flight'] }}</div>
+                </div>
+                <div class="p-4 rounded-lg border border-[var(--ui-border)] bg-[var(--ui-muted-5)]">
+                    <div class="text-xs uppercase text-[var(--ui-muted)] mb-1">Audio gesamt</div>
+                    <div class="text-2xl font-semibold text-[var(--ui-secondary)]">{{ $stats['total_minutes'] }} min</div>
+                </div>
+            </div>
+
             {{-- Recorder Panel --}}
             <x-ui-panel title="Audio aufnehmen" subtitle="Lange Meetings sind ok — Aufnahme wird gechunked und im Hintergrund verarbeitet.">
                 <div class="p-6 d-flex flex-col items-center gap-4"
@@ -171,76 +191,56 @@
                         Noch keine Aufnahmen. Starte jetzt deine erste Aufnahme.
                     </div>
                 @else
-                    <x-ui-table>
-                        <thead>
-                            <tr>
-                                <th class="text-left">Titel</th>
-                                <th class="text-left">Datum</th>
-                                <th class="text-left">Dauer</th>
-                                <th class="text-left">Sprache</th>
-                                <th class="text-left">Status</th>
-                                <th class="text-right">Aktionen</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach($recordings as $rec)
-                                <tr>
-                                    <td>
-                                        <a href="{{ route('whisper.recordings.show', ['recording' => $rec->id]) }}"
-                                           wire:navigate
-                                           class="font-medium text-[var(--ui-primary)] hover:underline">
-                                            {{ $rec->title ?: 'Aufnahme #'.$rec->id }}
-                                        </a>
-                                    </td>
-                                    <td class="text-sm text-[var(--ui-muted)]">{{ $rec->created_at->format('d.m.Y H:i') }}</td>
-                                    <td class="text-sm">{{ $rec->duration_seconds ? gmdate('H:i:s', $rec->duration_seconds) : '—' }}</td>
-                                    <td class="text-sm">{{ $rec->language ?: '—' }}</td>
-                                    <td>
-                                        @php
-                                            $variant = match($rec->status) {
-                                                'completed' => 'success',
-                                                'processing' => 'info',
-                                                'pending' => 'secondary',
-                                                'failed' => 'danger',
-                                                default => 'secondary',
-                                            };
-                                        @endphp
-                                        <x-ui-badge :variant="$variant">{{ $rec->status }}</x-ui-badge>
-                                        @if(in_array($rec->status, ['pending','processing']) && $rec->chunks_total)
-                                            <span class="text-xs text-[var(--ui-muted)] ml-1">{{ $rec->progressPercent() }}%</span>
+                    <div class="divide-y divide-[var(--ui-border)]">
+                        @foreach($recordings as $rec)
+                            @php
+                                $variant = match($rec->status) {
+                                    'completed' => 'success',
+                                    'processing' => 'info',
+                                    'pending' => 'secondary',
+                                    'failed' => 'danger',
+                                    default => 'secondary',
+                                };
+                            @endphp
+                            <div class="d-flex items-center gap-4 px-5 py-4 hover:bg-[var(--ui-muted-5)] transition">
+                                <div class="flex-grow-1 min-w-0">
+                                    <a href="{{ route('whisper.recordings.show', ['recording' => $rec->id]) }}"
+                                       wire:navigate
+                                       class="font-medium text-[var(--ui-primary)] hover:underline truncate block">
+                                        {{ $rec->title ?: 'Aufnahme #'.$rec->id }}
+                                    </a>
+                                    <div class="d-flex items-center gap-3 mt-1 text-xs text-[var(--ui-muted)]">
+                                        <span>{{ $rec->created_at->format('d.m.Y H:i') }}</span>
+                                        <span>·</span>
+                                        <span>{{ $rec->duration_seconds ? gmdate('H:i:s', $rec->duration_seconds) : '—' }}</span>
+                                        @if($rec->language)
+                                            <span>·</span>
+                                            <span class="uppercase">{{ $rec->language }}</span>
                                         @endif
-                                    </td>
-                                    <td class="text-right">
-                                        <x-ui-button
-                                            variant="danger"
-                                            size="sm"
-                                            wire:click="deleteRecording({{ $rec->id }})"
-                                            wire:confirm="Aufnahme wirklich löschen?">
-                                            Löschen
-                                        </x-ui-button>
-                                    </td>
-                                </tr>
-                            @endforeach
-                        </tbody>
-                    </x-ui-table>
+                                    </div>
+                                </div>
+                                <div class="d-flex items-center gap-2 flex-shrink-0">
+                                    <x-ui-badge :variant="$variant">{{ $rec->status }}</x-ui-badge>
+                                    @if(in_array($rec->status, ['pending','processing']) && $rec->chunks_total)
+                                        <span class="text-xs text-[var(--ui-muted)]">{{ $rec->progressPercent() }}%</span>
+                                    @endif
+                                </div>
+                                <div class="flex-shrink-0">
+                                    <x-ui-button
+                                        variant="danger-outline"
+                                        size="sm"
+                                        wire:click="deleteRecording({{ $rec->id }})"
+                                        wire:confirm="Aufnahme wirklich löschen?">
+                                        Löschen
+                                    </x-ui-button>
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
                 @endif
             </x-ui-panel>
         </div>
     </x-ui-page-container>
-
-    {{-- Linke Sidebar --}}
-    <x-slot name="sidebar">
-        <x-ui-page-sidebar title="Whisper" width="w-64" :defaultOpen="true">
-            <div class="p-4 space-y-2 text-sm">
-                <a href="{{ route('whisper.dashboard') }}"
-                   wire:navigate
-                   class="d-flex items-center gap-2 p-2 rounded bg-[var(--ui-muted-5)]">
-                    @svg('heroicon-o-microphone', 'w-4 h-4')
-                    <span>Dashboard</span>
-                </a>
-            </div>
-        </x-ui-page-sidebar>
-    </x-slot>
 
     {{-- Rechte Sidebar --}}
     <x-slot name="activity">

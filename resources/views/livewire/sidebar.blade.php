@@ -1,20 +1,64 @@
-<div x-data="{ collapsed: false }">
+<div>
+    {{-- Modul Header --}}
     <div x-show="!collapsed" class="p-3 text-sm italic text-[var(--ui-secondary)] uppercase border-b border-[var(--ui-border)] mb-2">
         Whisper
     </div>
 
+    {{-- Abschnitt: Allgemein --}}
     <x-ui-sidebar-list label="Allgemein">
         <x-ui-sidebar-item :href="route('whisper.dashboard')">
-            @svg('heroicon-o-microphone', 'w-4 h-4 text-[var(--ui-secondary)]')
+            @svg('heroicon-o-home', 'w-4 h-4 text-[var(--ui-secondary)]')
             <span class="ml-2 text-sm">Dashboard</span>
+        </x-ui-sidebar-item>
+        <x-ui-sidebar-item :href="route('whisper.dashboard') . '#recorder'">
+            @svg('heroicon-o-microphone', 'w-4 h-4 text-[var(--ui-secondary)]')
+            <span class="ml-2 text-sm">Neue Aufnahme</span>
         </x-ui-sidebar-item>
     </x-ui-sidebar-list>
 
+    {{-- Collapsed: Icons-only --}}
     <div x-show="collapsed" class="px-2 py-2 border-b border-[var(--ui-border)]">
         <div class="flex flex-col gap-2">
             <a href="{{ route('whisper.dashboard') }}" wire:navigate class="flex items-center justify-center p-2 rounded-md text-[var(--ui-secondary)] hover:bg-[var(--ui-muted-5)]">
+                @svg('heroicon-o-home', 'w-5 h-5')
+            </a>
+            <a href="{{ route('whisper.dashboard') }}#recorder" wire:navigate class="flex items-center justify-center p-2 rounded-md text-[var(--ui-secondary)] hover:bg-[var(--ui-muted-5)]">
                 @svg('heroicon-o-microphone', 'w-5 h-5')
             </a>
         </div>
+    </div>
+
+    {{-- Letzte Aufnahmen --}}
+    <div x-show="!collapsed">
+        @if($recordings->isNotEmpty())
+            <x-ui-sidebar-list label="Letzte Aufnahmen">
+                @foreach($recordings as $rec)
+                    <a wire:key="rec-{{ $rec->id }}"
+                       href="{{ route('whisper.recordings.show', ['recording' => $rec->id]) }}"
+                       wire:navigate
+                       title="{{ $rec->title }}"
+                       class="flex items-center gap-2 py-1 pl-3 pr-2 text-[var(--ui-secondary)] hover:text-[var(--ui-primary)] transition truncate">
+                        @php
+                            $dotColor = match($rec->status) {
+                                'completed' => '#10b981',
+                                'processing' => '#3b82f6',
+                                'pending' => '#9ca3af',
+                                'failed' => '#ef4444',
+                                default => '#9ca3af',
+                            };
+                        @endphp
+                        <span class="w-1.5 h-1.5 rounded-full flex-shrink-0" style="background-color: {{ $dotColor }}"></span>
+                        <span class="truncate text-xs">{{ $rec->title ?: 'Aufnahme #'.$rec->id }}</span>
+                        @if($rec->duration_seconds)
+                            <span class="ml-auto text-[10px] text-[var(--ui-muted)] flex-shrink-0">{{ gmdate('i:s', $rec->duration_seconds) }}</span>
+                        @endif
+                    </a>
+                @endforeach
+            </x-ui-sidebar-list>
+        @else
+            <div class="px-3 py-2 text-xs text-[var(--ui-muted)]">
+                Noch keine Aufnahmen
+            </div>
+        @endif
     </div>
 </div>

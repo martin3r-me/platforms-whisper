@@ -121,20 +121,6 @@
         </div>
     </x-ui-page-container>
 
-    {{-- Linke Sidebar --}}
-    <x-slot name="sidebar">
-        <x-ui-page-sidebar title="Whisper" width="w-64" :defaultOpen="true">
-            <div class="p-4 space-y-2 text-sm">
-                <a href="{{ route('whisper.dashboard') }}"
-                   wire:navigate
-                   class="d-flex items-center gap-2 p-2 rounded hover:bg-[var(--ui-muted-5)]">
-                    @svg('heroicon-o-arrow-left', 'w-4 h-4')
-                    <span>Zurück zum Dashboard</span>
-                </a>
-            </div>
-        </x-ui-page-sidebar>
-    </x-slot>
-
     {{-- Rechte Sidebar --}}
     <x-slot name="activity">
         <x-ui-page-sidebar title="Details" width="w-72" :defaultOpen="false" storeKey="activityOpen" side="right">

@@ -50,6 +50,24 @@ class WhisperServiceProvider extends ServiceProvider
         $this->loadViewsFrom(__DIR__ . '/../resources/views', 'whisper');
 
         $this->registerLivewireComponents();
+        $this->registerTools();
+    }
+
+    protected function registerTools(): void
+    {
+        try {
+            $registry = resolve(\Platform\Core\Tools\ToolRegistry::class);
+
+            $registry->register(new \Platform\Whisper\Tools\WhisperOverviewTool());
+            $registry->register(new \Platform\Whisper\Tools\ListRecordingsTool());
+            $registry->register(new \Platform\Whisper\Tools\GetRecordingTool());
+            $registry->register(new \Platform\Whisper\Tools\UpdateRecordingTool());
+            $registry->register(new \Platform\Whisper\Tools\DeleteRecordingTool());
+            $registry->register(new \Platform\Whisper\Tools\SearchRecordingsTool());
+            $registry->register(new \Platform\Whisper\Tools\GetTranscriptTool());
+        } catch (\Throwable $e) {
+            \Log::warning('Whisper: Tool-Registrierung fehlgeschlagen', ['error' => $e->getMessage()]);
+        }
     }
 
     protected function registerLivewireComponents(): void
