@@ -29,6 +29,14 @@ return [
 
         // Optional: erwartete Anzahl Sprecher (verbessert Diarization). 0 = automatisch.
         'speakers_expected' => (int) env('WHISPER_AAI_SPEAKERS_EXPECTED', 0),
+
+        // Speech-Model-Prioritaetsliste (AssemblyAI waehlt den ersten verfuegbaren).
+        // Gueltige Werte (Stand 2026): universal-3-pro, universal-2.
+        // Via ENV als komma-separierte Liste ueberschreibbar.
+        'speech_models' => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) env('WHISPER_AAI_SPEECH_MODELS', 'universal-3-pro,universal-2'))
+        ))),
     ],
 
     'navigation' => [

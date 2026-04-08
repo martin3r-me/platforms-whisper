@@ -58,8 +58,16 @@ class AssemblyAiTranscriptionService
         $uploadUrl = $this->uploadFile($apiKey, $filePath, $timeout);
 
         // 2) Submit transcription job
+        $speechModels = (array) config('whisper.assemblyai.speech_models', ['universal-3-pro', 'universal-2']);
+        // Defensive: leere/falsche Config → sicherer Default.
+        $speechModels = array_values(array_filter($speechModels, fn($m) => is_string($m) && $m !== ''));
+        if ($speechModels === []) {
+            $speechModels = ['universal-3-pro', 'universal-2'];
+        }
+
         $payload = [
             'audio_url' => $uploadUrl,
+            'speech_models' => $speechModels,
             'speaker_labels' => $diarize,
             'punctuate' => true,
             'format_text' => true,
@@ -217,7 +225,7 @@ class AssemblyAiTranscriptionService
             'duration' => $duration,
             'segments' => $segments,
             'speakers_count' => count($speakerMap),
-            'model' => 'assemblyai:' . ($data['speech_model'] ?? 'universal'),
+            'model' => 'assemblyai:' . ($data['speech_model'] ?? ($data['speech_models'][0] ?? 'universal')),
             'provider_id' => (string) ($data['id'] ?? ''),
         ];
     }
