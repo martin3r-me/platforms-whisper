@@ -25,6 +25,7 @@ class WhisperRecording extends Model
         'title',
         'transcript',
         'summary',
+        'action_items',
         'segments',
         'speakers_count',
         'speaker_map',

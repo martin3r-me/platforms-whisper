@@ -16,7 +16,7 @@ class WhisperOverviewTool implements ToolContract, ToolMetadataContract
 
     public function getDescription(): string
     {
-        return 'GET /whisper/overview - Zeigt Uebersicht ueber das Whisper-Modul (Konzepte, Datenmodell, verfuegbare Tools). Whisper ist ein Audio-Transkriptions-Modul: Browser-Recorder -> AssemblyAI (Transcript + Speaker Diarization) -> LLM-Summary. Audio wird nicht persistiert.';
+        return 'GET /whisper/overview - Zeigt Uebersicht ueber das Whisper-Modul (Konzepte, Datenmodell, verfuegbare Tools). Whisper ist ein Audio-Transkriptions-Modul: Browser-Recorder -> AssemblyAI (Transcript + Speaker Diarization) -> LeMUR (Titel + Summary + Action Items + Q&A). Audio wird nicht persistiert.';
     }
 
     public function getSchema(): array
@@ -43,13 +43,13 @@ class WhisperOverviewTool implements ToolContract, ToolMetadataContract
                         'table' => 'whisper_recordings',
                         'key_fields' => [
                             'id', 'uuid', 'team_id', 'created_by_user_id',
-                            'title', 'transcript', 'summary',
-                            'segments', 'speakers_count',
+                            'title', 'transcript', 'summary', 'action_items',
+                            'segments', 'speakers_count', 'speaker_map',
                             'language', 'duration_seconds',
                             'model', 'provider_id', 'status', 'error_message',
                             'file_size_bytes',
                         ],
-                        'note' => 'Audio-Aufnahme wird im Browser via MediaRecorder erstellt, an AssemblyAI gesendet (Transcription + Speaker Diarization). Nur Transkript, Sprecher-Segmente und LLM-Summary werden persistiert. Audio-Datei wird nach Verarbeitung verworfen.',
+                        'note' => 'Audio-Aufnahme wird im Browser via MediaRecorder erstellt, an AssemblyAI gesendet (Transcription + Speaker Diarization). Anschliessend laeuft AssemblyAI LeMUR (Claude/Anthropic) ueber dem Transkript und generiert Titel, Summary und Action Items. Audio-Datei wird nach Verarbeitung verworfen. provider_id = AssemblyAI transcript id (wird fuer LeMUR-Calls weiterverwendet).',
                     ],
                 ],
                 'status_funnel' => [
@@ -59,10 +59,11 @@ class WhisperOverviewTool implements ToolContract, ToolMetadataContract
                     'failed' => 'Fehler waehrend Verarbeitung. error_message enthaelt Details.',
                 ],
                 'features' => [
-                    'speaker_diarization' => 'AssemblyAI liefert speaker_labels; Segmente mit speaker/start/end/text landen in Spalte segments. speakers_count zaehlt die erkannten Sprecher.',
-                    'llm_summary' => 'Nach Transkription generiert WhisperSummaryService via OpenAI einen praegnanten Titel (max 70 Zeichen) und Bullet-Point-Summary.',
+                    'speaker_diarization' => 'AssemblyAI liefert speaker_labels; Segmente mit speaker/start/end/text landen in Spalte segments. speakers_count zaehlt die erkannten Sprecher. speaker_map erlaubt manuelles Benennen der Sprecher in der UI.',
+                    'lemur_insights' => 'Nach Transkription ruft AssemblyAiLemurService /lemur/v3/generate/task auf und generiert in einem einzigen Call Titel + Summary + Action Items (Claude/Anthropic unter der Haube).',
+                    'lemur_qa' => 'Ueber whisper.recording.question.POST kann eine beliebige Frage an das Transkript gestellt werden (LeMUR Q&A, nutzt provider_id als transcript_id).',
                     'queue_based' => 'Upload kehrt sofort zurueck, TranscribeRecordingJob verarbeitet im Hintergrund (timeout 1800s).',
-                    'audio_discarded' => 'Audio-Datei wird nach Transkription geloescht. Nur Transkript + Segmente bleiben persistent.',
+                    'audio_discarded' => 'Audio-Datei wird nach Transkription geloescht. Nur Transkript + Segmente + Insights bleiben persistent.',
                 ],
                 'segments_schema' => [
                     'type' => 'array<object>',
@@ -85,6 +86,7 @@ class WhisperOverviewTool implements ToolContract, ToolMetadataContract
                         'delete' => 'whisper.recordings.DELETE',
                         'search' => 'whisper.recordings.search.GET',
                         'transcript' => 'whisper.recording.transcript.GET',
+                        'question' => 'whisper.recording.question.POST',
                     ],
                 ],
             ]);

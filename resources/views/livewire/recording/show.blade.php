@@ -78,6 +78,15 @@
                 </x-ui-panel>
             @endif
 
+            {{-- Action Items (falls vorhanden) --}}
+            @if($recording->action_items)
+                <x-ui-panel title="Action Items">
+                    <div class="p-4">
+                        <div class="whitespace-pre-wrap text-sm leading-relaxed text-[var(--ui-fg)]">{{ $recording->action_items }}</div>
+                    </div>
+                </x-ui-panel>
+            @endif
+
             {{-- Transcript --}}
             <x-ui-panel :title="$recording->speakers_count > 1 ? 'Transkript · '.$recording->speakers_count.' Sprecher' : 'Transkript'">
                 <div class="p-4">

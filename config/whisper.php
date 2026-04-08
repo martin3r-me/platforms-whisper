@@ -39,6 +39,25 @@ return [
         ))),
     ],
 
+    /**
+     * LeMUR - LLM-Layer ueber dem Transkript. Wird nach erfolgreicher
+     * Transkription aufgerufen und erzeugt Titel/Summary/Action Items.
+     * Ausserdem steht Q&A fuer das AskRecordingQuestion-Tool zur Verfuegung.
+     */
+    'lemur' => [
+        'enabled' => (bool) env('WHISPER_LEMUR_ENABLED', true),
+
+        // AssemblyAI-LeMUR-Modell. Gueltige Werte (Stand 2026):
+        // "default", "anthropic/claude-sonnet-4-5", "anthropic/claude-opus-4-1",
+        // "anthropic/claude-haiku-4-5", "anthropic/claude-3-5-sonnet",
+        // "anthropic/claude-3-opus", "anthropic/claude-3-haiku".
+        'final_model' => env('WHISPER_LEMUR_MODEL', 'default'),
+
+        'max_output_size' => (int) env('WHISPER_LEMUR_MAX_OUTPUT', 2000),
+        'temperature' => (float) env('WHISPER_LEMUR_TEMPERATURE', 0.0),
+        'request_timeout' => (int) env('WHISPER_LEMUR_TIMEOUT', 120),
+    ],
+
     'navigation' => [
         'route' => 'whisper.dashboard',
         'icon'  => 'heroicon-o-microphone',

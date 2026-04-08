@@ -9,8 +9,8 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Platform\Whisper\Models\WhisperRecording;
+use Platform\Whisper\Services\AssemblyAiLemurService;
 use Platform\Whisper\Services\AssemblyAiTranscriptionService;
-use Platform\Whisper\Services\WhisperSummaryService;
 use Throwable;
 
 class TranscribeRecordingJob implements ShouldQueue
@@ -32,7 +32,7 @@ class TranscribeRecordingJob implements ShouldQueue
 
     public function handle(
         AssemblyAiTranscriptionService $transcription,
-        WhisperSummaryService $summarizer
+        AssemblyAiLemurService $lemur
     ): void {
         $recording = WhisperRecording::find($this->recordingId);
         if (!$recording) {
@@ -70,14 +70,17 @@ class TranscribeRecordingJob implements ShouldQueue
                 $update['duration_seconds'] = (int) round((float) $duration);
             }
 
-            // LLM-Zusammenfassung: Titel + Summary
-            $llm = $summarizer->summarize($finalTranscript, $detectedLang ?? $this->language);
+            // LeMUR: Titel + Summary + Action Items in einem Task-Call.
+            $providerId = (string) ($result['provider_id'] ?? '');
+            $insights = $providerId !== ''
+                ? $lemur->generateInsights($providerId, $detectedLang ?? $this->language)
+                : ['title' => null, 'summary' => null, 'action_items' => null];
 
             $hasDefaultTitle = !$recording->title || str_starts_with((string) $recording->title, 'Aufnahme vom ');
 
             if ($hasDefaultTitle) {
-                if (!empty($llm['title'])) {
-                    $update['title'] = $llm['title'];
+                if (!empty($insights['title'])) {
+                    $update['title'] = $insights['title'];
                 } else {
                     $fallback = $this->generateTitle($finalTranscript);
                     if ($fallback) {
@@ -86,8 +89,11 @@ class TranscribeRecordingJob implements ShouldQueue
                 }
             }
 
-            if (!empty($llm['summary'])) {
-                $update['summary'] = $llm['summary'];
+            if (!empty($insights['summary'])) {
+                $update['summary'] = $insights['summary'];
+            }
+            if (!empty($insights['action_items'])) {
+                $update['action_items'] = $insights['action_items'];
             }
 
             $recording->update($update);

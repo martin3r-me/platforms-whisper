@@ -71,6 +71,7 @@ class WhisperServiceProvider extends ServiceProvider
             $registry->register(new \Platform\Whisper\Tools\DeleteRecordingTool());
             $registry->register(new \Platform\Whisper\Tools\SearchRecordingsTool());
             $registry->register(new \Platform\Whisper\Tools\GetTranscriptTool());
+            $registry->register(resolve(\Platform\Whisper\Tools\AskRecordingQuestionTool::class));
         } catch (\Throwable $e) {
             \Log::warning('Whisper: Tool-Registrierung fehlgeschlagen', ['error' => $e->getMessage()]);
         }
