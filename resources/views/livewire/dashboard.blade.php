@@ -114,6 +114,32 @@
         </div>
     </x-ui-page-container>
 
+    {{-- Linke Sidebar --}}
+    <x-slot name="sidebar">
+        <x-ui-page-sidebar title="Whisper" width="w-80" :defaultOpen="true">
+            <div class="p-4">
+                <livewire:whisper.sidebar />
+            </div>
+        </x-ui-page-sidebar>
+    </x-slot>
+
+    {{-- Rechte Sidebar --}}
+    <x-slot name="activity">
+        <x-ui-page-sidebar title="Aktivitäten" width="w-80" :defaultOpen="false" storeKey="activityOpen" side="right">
+            <div class="p-4 space-y-3 text-sm">
+                <div class="text-[var(--ui-muted)]">Letzte Aufnahmen</div>
+                @foreach($recordings->take(10) as $rec)
+                    <a href="{{ route('whisper.recordings.show', ['recording' => $rec->id]) }}"
+                       wire:navigate
+                       class="block p-2 rounded border border-[var(--ui-border)]/60 bg-[var(--ui-muted-5)] hover:bg-[var(--ui-muted-10)]">
+                        <div class="font-medium text-[var(--ui-secondary)] truncate">{{ $rec->title ?: 'Aufnahme #'.$rec->id }}</div>
+                        <div class="text-xs text-[var(--ui-muted)]">{{ $rec->created_at->diffForHumans() }}</div>
+                    </a>
+                @endforeach
+            </div>
+        </x-ui-page-sidebar>
+    </x-slot>
+
     @push('scripts')
     <script>
         function whisperRecorder() {

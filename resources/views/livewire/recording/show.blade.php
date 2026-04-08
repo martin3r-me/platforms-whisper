@@ -84,4 +84,29 @@
             </div>
         </div>
     </x-ui-page-container>
+
+    {{-- Linke Sidebar --}}
+    <x-slot name="sidebar">
+        <x-ui-page-sidebar title="Whisper" width="w-80" :defaultOpen="true">
+            <div class="p-4">
+                <livewire:whisper.sidebar />
+            </div>
+        </x-ui-page-sidebar>
+    </x-slot>
+
+    {{-- Rechte Sidebar --}}
+    <x-slot name="activity">
+        <x-ui-page-sidebar title="Details" width="w-80" :defaultOpen="false" storeKey="activityOpen" side="right">
+            <div class="p-4 space-y-3 text-sm">
+                <div>
+                    <div class="text-xs uppercase text-[var(--ui-muted)]">Modell</div>
+                    <div class="font-medium">{{ $recording->model }}</div>
+                </div>
+                <div>
+                    <div class="text-xs uppercase text-[var(--ui-muted)]">Erstellt</div>
+                    <div class="font-medium">{{ $recording->created_at->diffForHumans() }}</div>
+                </div>
+            </div>
+        </x-ui-page-sidebar>
+    </x-slot>
 </x-ui-page>
