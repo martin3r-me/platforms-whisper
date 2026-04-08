@@ -10,6 +10,7 @@ use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Platform\Whisper\Models\WhisperRecording;
 use Platform\Whisper\Services\WhisperAudioChunkerService;
+use Platform\Whisper\Services\WhisperSummaryService;
 use Platform\Whisper\Services\WhisperTranscriptionService;
 use Throwable;
 
@@ -30,7 +31,11 @@ class TranscribeRecordingJob implements ShouldQueue
     ) {
     }
 
-    public function handle(WhisperTranscriptionService $whisper, WhisperAudioChunkerService $chunker): void
+    public function handle(
+        WhisperTranscriptionService $whisper,
+        WhisperAudioChunkerService $chunker,
+        WhisperSummaryService $summarizer
+    ): void
     {
         $recording = WhisperRecording::find($this->recordingId);
         if (!$recording) {
@@ -107,10 +112,25 @@ class TranscribeRecordingJob implements ShouldQueue
                 'status' => WhisperRecording::STATUS_COMPLETED,
             ];
 
-            // Auto-Title aus erstem Satz wenn Default-Titel ("Aufnahme vom ...")
-            $smartTitle = $this->generateTitle($finalTranscript);
-            if ($smartTitle && (!$recording->title || str_starts_with((string) $recording->title, 'Aufnahme vom '))) {
-                $update['title'] = $smartTitle;
+            // LLM-Zusammenfassung: Titel + Summary
+            $llm = $summarizer->summarize($finalTranscript, $detectedLang ?? $this->language);
+
+            $hasDefaultTitle = !$recording->title || str_starts_with((string) $recording->title, 'Aufnahme vom ');
+
+            if ($hasDefaultTitle) {
+                if (!empty($llm['title'])) {
+                    $update['title'] = $llm['title'];
+                } else {
+                    // Fallback: erster Satz
+                    $fallback = $this->generateTitle($finalTranscript);
+                    if ($fallback) {
+                        $update['title'] = $fallback;
+                    }
+                }
+            }
+
+            if (!empty($llm['summary'])) {
+                $update['summary'] = $llm['summary'];
             }
 
             $recording->update($update);

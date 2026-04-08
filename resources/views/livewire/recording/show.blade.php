@@ -80,6 +80,15 @@
                 </x-ui-panel>
             @endif
 
+            {{-- Summary (falls vorhanden) --}}
+            @if($recording->summary)
+                <x-ui-panel title="Zusammenfassung">
+                    <div class="p-4">
+                        <div class="whitespace-pre-wrap text-sm leading-relaxed text-[var(--ui-fg)]">{{ $recording->summary }}</div>
+                    </div>
+                </x-ui-panel>
+            @endif
+
             {{-- Transcript --}}
             <x-ui-panel title="Transkript">
                 <div class="p-4">

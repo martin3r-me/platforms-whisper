@@ -43,11 +43,11 @@ class WhisperOverviewTool implements ToolContract, ToolMetadataContract
                         'table' => 'whisper_recordings',
                         'key_fields' => [
                             'id', 'uuid', 'team_id', 'created_by_user_id',
-                            'title', 'transcript', 'language', 'duration_seconds',
+                            'title', 'transcript', 'summary', 'language', 'duration_seconds',
                             'model', 'status', 'error_message',
                             'chunks_total', 'chunks_done', 'file_size_bytes',
                         ],
-                        'note' => 'Audio-Aufnahme wird im Browser via MediaRecorder erstellt, an OpenAI Whisper transkribiert und nur das Transkript persistiert. Audio-Datei wird nach Verarbeitung verworfen.',
+                        'note' => 'Audio-Aufnahme wird im Browser via MediaRecorder erstellt, an OpenAI Whisper transkribiert und nur das Transkript persistiert. Audio-Datei wird nach Verarbeitung verworfen. Nach der Transkription erzeugt ein LLM automatisch Titel und Kurz-Zusammenfassung (Bullet-Points).',
                     ],
                 ],
                 'status_funnel' => [

@@ -70,6 +70,7 @@ class GetRecordingTool implements ToolContract, ToolMetadataContract
                 'uuid' => $rec->uuid,
                 'title' => $rec->title,
                 'transcript' => $rec->transcript,
+                'summary' => $rec->summary,
                 'language' => $rec->language,
                 'duration_seconds' => $rec->duration_seconds,
                 'model' => $rec->model,

@@ -24,6 +24,7 @@ class WhisperRecording extends Model
         'created_by_user_id',
         'title',
         'transcript',
+        'summary',
         'language',
         'duration_seconds',
         'chunks_total',
