@@ -11,21 +11,33 @@
     </x-slot>
 
     <x-ui-page-container>
-        <div class="space-y-6">
+        @php
+            $isInFlight = in_array($recording->status, ['pending', 'processing'], true);
+            $progress = $recording->progressPercent();
+        @endphp
+
+        <div class="space-y-6"
+             @if($isInFlight) wire:poll.3s @endif>
             {{-- Meta --}}
             <x-ui-panel title="Details">
-                <div class="p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+                <div class="p-4 grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
                     <div>
                         <div class="text-[var(--ui-muted)] text-xs uppercase">Datum</div>
                         <div class="font-medium">{{ $recording->created_at->format('d.m.Y H:i') }}</div>
                     </div>
                     <div>
                         <div class="text-[var(--ui-muted)] text-xs uppercase">Dauer</div>
-                        <div class="font-medium">{{ $recording->duration_seconds ? gmdate('i:s', $recording->duration_seconds) : '—' }}</div>
+                        <div class="font-medium">{{ $recording->duration_seconds ? gmdate('H:i:s', $recording->duration_seconds) : '—' }}</div>
                     </div>
                     <div>
                         <div class="text-[var(--ui-muted)] text-xs uppercase">Sprache</div>
                         <div class="font-medium">{{ $recording->language ?: '—' }}</div>
+                    </div>
+                    <div>
+                        <div class="text-[var(--ui-muted)] text-xs uppercase">Größe</div>
+                        <div class="font-medium">
+                            {{ $recording->file_size_bytes ? number_format($recording->file_size_bytes / 1024 / 1024, 1, ',', '.').' MB' : '—' }}
+                        </div>
                     </div>
                     <div>
                         <div class="text-[var(--ui-muted)] text-xs uppercase">Status</div>
@@ -34,6 +46,7 @@
                                 $variant = match($recording->status) {
                                     'completed' => 'success',
                                     'processing' => 'info',
+                                    'pending' => 'secondary',
                                     'failed' => 'danger',
                                     default => 'secondary',
                                 };
@@ -44,6 +57,29 @@
                 </div>
             </x-ui-panel>
 
+            {{-- Progress (während Verarbeitung) --}}
+            @if($isInFlight)
+                <x-ui-panel title="Verarbeitung läuft">
+                    <div class="p-4 space-y-3">
+                        <div class="d-flex items-center justify-between text-sm">
+                            <span class="text-[var(--ui-muted)]">
+                                @if($recording->chunks_total)
+                                    Chunk {{ $recording->chunks_done ?? 0 }} von {{ $recording->chunks_total }}
+                                @else
+                                    Audio wird vorbereitet…
+                                @endif
+                            </span>
+                            <span class="font-mono">{{ $progress }}%</span>
+                        </div>
+                        <div class="w-full h-2 bg-[var(--ui-muted-5)] rounded-full overflow-hidden">
+                            <div class="h-full bg-[var(--ui-primary)] transition-all duration-500"
+                                 style="width: {{ $progress }}%"></div>
+                        </div>
+                        <div class="text-xs text-[var(--ui-muted)]">Aktualisiert sich automatisch alle 3 Sekunden.</div>
+                    </div>
+                </x-ui-panel>
+            @endif
+
             {{-- Transcript --}}
             <x-ui-panel title="Transkript">
                 <div class="p-4">
@@ -51,9 +87,9 @@
                         <div class="p-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
                             <strong>Fehler:</strong> {{ $recording->error_message }}
                         </div>
-                    @elseif($recording->status === 'processing')
+                    @elseif(!$recording->transcript && $isInFlight)
                         <div class="p-3 rounded-lg bg-[var(--ui-muted-5)] text-[var(--ui-muted)] text-sm">
-                            Transkription läuft…
+                            Transkription läuft… Erste Ergebnisse erscheinen hier sobald der erste Chunk fertig ist.
                         </div>
                     @else
                         <div x-data="{ copied: false }" class="space-y-3">
@@ -87,16 +123,21 @@
 
     {{-- Linke Sidebar --}}
     <x-slot name="sidebar">
-        <x-ui-page-sidebar title="Whisper" width="w-80" :defaultOpen="true">
-            <div class="p-4">
-                <livewire:whisper.sidebar />
+        <x-ui-page-sidebar title="Whisper" width="w-64" :defaultOpen="true">
+            <div class="p-4 space-y-2 text-sm">
+                <a href="{{ route('whisper.dashboard') }}"
+                   wire:navigate
+                   class="d-flex items-center gap-2 p-2 rounded hover:bg-[var(--ui-muted-5)]">
+                    @svg('heroicon-o-arrow-left', 'w-4 h-4')
+                    <span>Zurück zum Dashboard</span>
+                </a>
             </div>
         </x-ui-page-sidebar>
     </x-slot>
 
     {{-- Rechte Sidebar --}}
     <x-slot name="activity">
-        <x-ui-page-sidebar title="Details" width="w-80" :defaultOpen="false" storeKey="activityOpen" side="right">
+        <x-ui-page-sidebar title="Details" width="w-72" :defaultOpen="false" storeKey="activityOpen" side="right">
             <div class="p-4 space-y-3 text-sm">
                 <div>
                     <div class="text-xs uppercase text-[var(--ui-muted)]">Modell</div>
@@ -105,6 +146,12 @@
                 <div>
                     <div class="text-xs uppercase text-[var(--ui-muted)]">Erstellt</div>
                     <div class="font-medium">{{ $recording->created_at->diffForHumans() }}</div>
+                </div>
+                <div>
+                    <div class="text-xs uppercase text-[var(--ui-muted)]">Datei-Größe</div>
+                    <div class="font-medium">
+                        {{ $recording->file_size_bytes ? number_format($recording->file_size_bytes / 1024 / 1024, 2, ',', '.').' MB' : '—' }}
+                    </div>
                 </div>
             </div>
         </x-ui-page-sidebar>

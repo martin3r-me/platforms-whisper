@@ -34,7 +34,8 @@ class WhisperTranscriptionService
         $apiKey = $this->getApiKey();
 
         $request = Http::withToken($apiKey)
-            ->timeout(120)
+            ->timeout((int) config('whisper.api_timeout', 600))
+            ->connectTimeout(30)
             ->attach('file', file_get_contents($filePath), $filename);
 
         $payload = [

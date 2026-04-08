@@ -8,7 +8,7 @@ use Platform\Whisper\Models\WhisperRecording;
 
 class Show extends Component
 {
-    public WhisperRecording $recording;
+    public int $recordingId;
 
     public function mount(WhisperRecording $recording): void
     {
@@ -19,19 +19,33 @@ class Show extends Component
             abort(404);
         }
 
-        $this->recording = $recording;
+        $this->recordingId = $recording->id;
     }
 
     public function delete()
     {
-        $this->recording->delete();
+        $recording = WhisperRecording::find($this->recordingId);
+        if ($recording) {
+            $recording->delete();
+        }
         return redirect()->route('whisper.dashboard');
+    }
+
+    public function getRecordingProperty(): ?WhisperRecording
+    {
+        return WhisperRecording::find($this->recordingId);
     }
 
     public function render()
     {
+        $recording = $this->recording;
+
+        if (!$recording) {
+            abort(404);
+        }
+
         return view('whisper::livewire.recording.show', [
-            'recording' => $this->recording,
+            'recording' => $recording,
         ])->layout('platform::layouts.app');
     }
 }

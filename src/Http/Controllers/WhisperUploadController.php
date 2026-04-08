@@ -7,16 +7,17 @@ use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Str;
+use Platform\Whisper\Jobs\TranscribeRecordingJob;
 use Platform\Whisper\Models\WhisperRecording;
-use Platform\Whisper\Services\WhisperTranscriptionService;
 use Throwable;
 
 class WhisperUploadController extends Controller
 {
-    public function store(Request $request, WhisperTranscriptionService $service): JsonResponse
+    public function store(Request $request): JsonResponse
     {
         $request->validate([
-            'audio' => 'required|file|max:51200', // 50 MB
+            'audio' => 'required|file|max:512000', // 500 MB
         ]);
 
         $user = Auth::user();
@@ -29,56 +30,49 @@ class WhisperUploadController extends Controller
             return response()->json(['error' => 'No team context'], 422);
         }
 
-        $recording = WhisperRecording::create([
-            'team_id' => $team->id,
-            'created_by_user_id' => $user->id,
-            'title' => 'Aufnahme vom ' . now()->format('d.m.Y H:i'),
-            'status' => WhisperRecording::STATUS_PROCESSING,
-            'model' => 'whisper-1',
-        ]);
-
         try {
             $file = $request->file('audio');
-            $extension = $file->getClientOriginalExtension() ?: 'webm';
-            $filename = 'audio.' . $extension;
+            $extension = strtolower($file->getClientOriginalExtension() ?: 'webm');
 
-            $result = $service->transcribe(
-                $file->getRealPath(),
-                $filename,
-                'de',
-                'whisper-1'
-            );
+            // Persistente Tmp-Datei (überlebt den Request, wird vom Job aufgeräumt)
+            $tmpDir = storage_path('app/whisper-tmp');
+            if (!is_dir($tmpDir)) {
+                @mkdir($tmpDir, 0755, true);
+            }
 
-            $recording->update([
-                'transcript' => $result['transcript'],
-                'language' => $result['language'],
-                'duration_seconds' => $result['duration'] ? (int) round($result['duration']) : null,
-                'model' => $result['model'],
-                'status' => WhisperRecording::STATUS_COMPLETED,
+            $tmpName = (string) Str::uuid() . '.' . $extension;
+            $tmpPath = $tmpDir . '/' . $tmpName;
+
+            if (!@move_uploaded_file($file->getRealPath(), $tmpPath)) {
+                // Fallback (z.B. bei symlinked tmp)
+                if (!@copy($file->getRealPath(), $tmpPath)) {
+                    throw new \RuntimeException('Konnte Audio-Datei nicht im Tmp-Verzeichnis ablegen.');
+                }
+            }
+            @chmod($tmpPath, 0644);
+
+            $sizeBytes = filesize($tmpPath) ?: null;
+
+            $recording = WhisperRecording::create([
+                'team_id' => $team->id,
+                'created_by_user_id' => $user->id,
+                'title' => 'Aufnahme vom ' . now()->format('d.m.Y H:i'),
+                'status' => WhisperRecording::STATUS_PENDING,
+                'model' => 'whisper-1',
+                'file_size_bytes' => $sizeBytes,
             ]);
+
+            TranscribeRecordingJob::dispatch($recording->id, $tmpPath, 'de');
 
             return response()->json([
                 'id' => $recording->id,
                 'uuid' => $recording->uuid,
-                'transcript' => $recording->transcript,
                 'status' => $recording->status,
+                'redirect' => route('whisper.recordings.show', ['recording' => $recording->id]),
             ]);
         } catch (Throwable $e) {
-            Log::error('Whisper transcription failed', [
-                'recording_id' => $recording->id,
-                'error' => $e->getMessage(),
-            ]);
-
-            $recording->update([
-                'status' => WhisperRecording::STATUS_FAILED,
-                'error_message' => $e->getMessage(),
-            ]);
-
-            return response()->json([
-                'id' => $recording->id,
-                'status' => $recording->status,
-                'error' => $e->getMessage(),
-            ], 500);
+            Log::error('Whisper upload failed', ['error' => $e->getMessage()]);
+            return response()->json(['error' => $e->getMessage()], 500);
         }
     }
 }
