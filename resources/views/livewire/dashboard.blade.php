@@ -210,46 +210,33 @@
                     <div class="divide-y divide-[var(--ui-border)]">
                         @foreach($recordings as $rec)
                             @php
-                                $variant = match($rec->status) {
-                                    'completed' => 'success',
-                                    'processing' => 'info',
-                                    'pending' => 'secondary',
-                                    'failed' => 'danger',
-                                    default => 'secondary',
+                                $dotColor = match($rec->status) {
+                                    'completed' => '#10b981',
+                                    'processing' => '#3b82f6',
+                                    'pending' => '#9ca3af',
+                                    'failed' => '#ef4444',
+                                    default => '#9ca3af',
                                 };
                             @endphp
-                            <div class="d-flex items-center gap-4 px-5 py-4 hover:bg-[var(--ui-muted-5)] transition">
-                                <div class="flex-grow-1 min-w-0">
-                                    <a href="{{ route('whisper.recordings.show', ['recording' => $rec->id]) }}"
-                                       wire:navigate
-                                       class="font-medium text-[var(--ui-primary)] hover:underline truncate block">
-                                        {{ $rec->title ?: 'Aufnahme #'.$rec->id }}
-                                    </a>
-                                    <div class="d-flex items-center gap-3 mt-1 text-xs text-[var(--ui-muted)]">
-                                        <span>{{ $rec->created_at->format('d.m.Y H:i') }}</span>
-                                        <span>·</span>
-                                        <span>{{ $rec->duration_seconds ? gmdate('H:i:s', $rec->duration_seconds) : '—' }}</span>
-                                        @if($rec->language)
-                                            <span>·</span>
-                                            <span class="uppercase">{{ $rec->language }}</span>
-                                        @endif
-                                    </div>
-                                </div>
-                                <div class="d-flex items-center gap-2 flex-shrink-0">
-                                    <x-ui-badge :variant="$variant">{{ $rec->status }}</x-ui-badge>
-                                    @if(in_array($rec->status, ['pending','processing']) && $rec->chunks_total)
-                                        <span class="text-xs text-[var(--ui-muted)]">{{ $rec->progressPercent() }}%</span>
-                                    @endif
-                                </div>
-                                <div class="flex-shrink-0">
-                                    <x-ui-button
-                                        variant="danger-outline"
-                                        size="sm"
+                            <div class="flex items-center gap-3 px-4 py-2 hover:bg-[var(--ui-muted-5)] transition text-sm">
+                                <span class="w-2 h-2 rounded-full flex-shrink-0" style="background-color: {{ $dotColor }}" title="{{ $rec->status }}"></span>
+                                <a href="{{ route('whisper.recordings.show', ['recording' => $rec->id]) }}"
+                                   wire:navigate
+                                   class="flex-grow-1 min-w-0 truncate text-[var(--ui-primary)] hover:underline">
+                                    {{ $rec->title ?: 'Aufnahme #'.$rec->id }}
+                                </a>
+                                <span class="text-xs text-[var(--ui-muted)] flex-shrink-0 hidden sm:inline">{{ $rec->created_at->format('d.m.Y H:i') }}</span>
+                                <span class="text-xs text-[var(--ui-muted)] flex-shrink-0 font-mono w-16 text-right">{{ $rec->duration_seconds ? gmdate('H:i:s', $rec->duration_seconds) : '—' }}</span>
+                                @if(in_array($rec->status, ['pending','processing']) && $rec->chunks_total)
+                                    <span class="text-xs text-[var(--ui-muted)] flex-shrink-0 w-10 text-right">{{ $rec->progressPercent() }}%</span>
+                                @endif
+                                <button type="button"
                                         wire:click="deleteRecording({{ $rec->id }})"
-                                        wire:confirm="Aufnahme wirklich löschen?">
-                                        Löschen
-                                    </x-ui-button>
-                                </div>
+                                        wire:confirm="Aufnahme wirklich löschen?"
+                                        class="flex-shrink-0 p-1 rounded text-[var(--ui-muted)] hover:text-rose-600 hover:bg-rose-50 transition"
+                                        title="Löschen">
+                                    @svg('heroicon-o-trash', 'w-4 h-4')
+                                </button>
                             </div>
                         @endforeach
                     </div>
