@@ -7,7 +7,7 @@ use Livewire\Attributes\On;
 use Livewire\Component;
 use Platform\Organization\Models\OrganizationContext;
 use Platform\Organization\Models\OrganizationEntity;
-use Platform\Organization\Models\OrganizationEntityLink;
+use Platform\Organization\Services\EntityDimensionBridge;
 use Platform\Whisper\Models\WhisperRecording;
 
 class Sidebar extends Component
@@ -60,11 +60,8 @@ class Sidebar extends Component
                 }
             }
 
-            // b) OrganizationEntityLink (LLM-Verknüpfungen)
-            $links = OrganizationEntityLink::query()
-                ->whereIn('linkable_type', $morphTypes)
-                ->whereIn('linkable_id', $recordingIds)
-                ->get();
+            // b) DimensionLink entity dimension (LLM-Verknüpfungen)
+            $links = EntityDimensionBridge::linksForLinkables($morphTypes, $recordingIds, false);
 
             foreach ($links as $link) {
                 $entityRecordingMap[$link->entity_id][] = $link->linkable_id;
