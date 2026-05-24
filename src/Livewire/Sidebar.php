@@ -5,7 +5,6 @@ namespace Platform\Whisper\Livewire;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Attributes\On;
 use Livewire\Component;
-use Platform\Organization\Models\OrganizationContext;
 use Platform\Organization\Models\OrganizationEntity;
 use Platform\Organization\Services\EntityDimensionBridge;
 use Platform\Whisper\Models\WhisperRecording;
@@ -45,22 +44,7 @@ class Sidebar extends Component
 
         $morphTypes = ['whisper_recording', WhisperRecording::class];
 
-        // a) OrganizationContext (UI-Verknüpfungen)
         if (!empty($recordingIds)) {
-            $contexts = OrganizationContext::query()
-                ->whereIn('contextable_type', $morphTypes)
-                ->whereIn('contextable_id', $recordingIds)
-                ->where('is_active', true)
-                ->get();
-
-            foreach ($contexts as $ctx) {
-                if ($ctx->organization_entity_id) {
-                    $entityRecordingMap[$ctx->organization_entity_id][] = $ctx->contextable_id;
-                    $linkedRecordingIds[] = $ctx->contextable_id;
-                }
-            }
-
-            // b) DimensionLink entity dimension (LLM-Verknüpfungen)
             $links = EntityDimensionBridge::linksForLinkables($morphTypes, $recordingIds, false);
 
             foreach ($links as $link) {
