@@ -20,7 +20,7 @@ class ImportRecordingTool implements ToolContract, ToolMetadataContract
 
     public function getDescription(): string
     {
-        return 'POST /whisper/recordings/import - Importiert eine externe Aufnahme (z.B. von Plaud) mit Transkript, Segmenten, Summary und Action Items. Duplikat-Erkennung via source + source_id.';
+        return 'POST /whisper/recordings/import - Importiert eine externe Aufnahme (z.B. von Plaud) mit Metadaten, Summary und Action Items. Segmente werden separat via whisper.recordings.segments.APPEND in Batches angehängt. Duplikat-Erkennung via source + source_id.';
     }
 
     public function getSchema(): array
@@ -43,23 +43,6 @@ class ImportRecordingTool implements ToolContract, ToolMetadataContract
                 'title' => [
                     'type' => 'string',
                     'description' => 'Titel der Aufnahme (ERFORDERLICH).',
-                ],
-                'transcript' => [
-                    'type' => 'string',
-                    'description' => 'Vollstaendiges Transkript als Fliesstext.',
-                ],
-                'segments' => [
-                    'type' => 'array',
-                    'description' => 'Speaker-Segmente. Array von Objekten mit: speaker (string), start (float, Sekunden), end (float, Sekunden), text (string).',
-                    'items' => [
-                        'type' => 'object',
-                        'properties' => [
-                            'speaker' => ['type' => 'string'],
-                            'start' => ['type' => 'number'],
-                            'end' => ['type' => 'number'],
-                            'text' => ['type' => 'string'],
-                        ],
-                    ],
                 ],
                 'summary' => [
                     'type' => 'string',
@@ -130,42 +113,20 @@ class ImportRecordingTool implements ToolContract, ToolMetadataContract
                 ]);
             }
 
-            // Segmente normalisieren
-            $segments = $arguments['segments'] ?? [];
-            $speakerLabels = [];
-            foreach ($segments as $seg) {
-                $speaker = $seg['speaker'] ?? 'A';
-                $speakerLabels[$speaker] = true;
-            }
-            $speakersCount = count($speakerLabels);
-
-            // Transcript aus Segmenten bauen, falls nicht mitgegeben
-            $transcript = trim((string) ($arguments['transcript'] ?? ''));
-            if ($transcript === '' && !empty($segments)) {
-                $transcript = implode("\n\n", array_map(
-                    fn ($seg) => ($seg['speaker'] ?? 'A') . ': ' . ($seg['text'] ?? ''),
-                    $segments
-                ));
-            }
-
-            // Speaker-Map: aus "Speaker 1" → "A", "Speaker 2" → "B" normalisieren
             $speakerMap = $arguments['speaker_map'] ?? null;
 
             $recording = WhisperRecording::create([
                 'team_id' => $teamId,
                 'created_by_user_id' => $context->user?->id,
                 'title' => $title,
-                'transcript' => $transcript ?: null,
                 'summary' => isset($arguments['summary']) ? trim($arguments['summary']) : null,
                 'action_items' => isset($arguments['action_items']) ? trim($arguments['action_items']) : null,
-                'segments' => !empty($segments) ? $segments : null,
-                'speakers_count' => $speakersCount > 0 ? $speakersCount : null,
                 'speaker_map' => $speakerMap,
                 'language' => $arguments['language'] ?? 'de',
                 'duration_seconds' => isset($arguments['duration_seconds']) ? (int) $arguments['duration_seconds'] : null,
                 'model' => 'import:' . $source,
                 'provider_id' => $providerId,
-                'status' => WhisperRecording::STATUS_COMPLETED,
+                'status' => WhisperRecording::STATUS_PROCESSING,
             ]);
 
             // Set created_at to recorded_at if provided
@@ -179,15 +140,15 @@ class ImportRecordingTool implements ToolContract, ToolMetadataContract
             }
 
             return ToolResult::success([
+                'recording_id' => $recording->id,
                 'id' => $recording->id,
                 'uuid' => $recording->uuid,
                 'title' => $recording->title,
                 'status' => $recording->status,
-                'speakers_count' => $recording->speakers_count,
                 'duration_seconds' => $recording->duration_seconds,
                 'team_id' => $recording->team_id,
                 'duplicate' => false,
-                'message' => "Aufnahme erfolgreich importiert als #{$recording->id}.",
+                'message' => "Aufnahme angelegt als #{$recording->id}. Nutze whisper.recordings.segments.APPEND um Segmente in Batches anzuhängen.",
             ]);
         } catch (\Throwable $e) {
             return ToolResult::error('EXECUTION_ERROR', 'Fehler beim Import: ' . $e->getMessage());
