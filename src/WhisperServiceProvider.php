@@ -57,6 +57,14 @@ class WhisperServiceProvider extends ServiceProvider
 
         $this->registerLivewireComponents();
         $this->registerTools();
+
+        // EntityLinkProvider for Organization snapshots
+        try {
+            resolve(\Platform\Organization\Services\EntityLinkRegistry::class)
+                ->register(new \Platform\Whisper\Organization\WhisperEntityLinkProvider());
+        } catch (\Throwable $e) {
+            // Organization-Modul nicht geladen
+        }
     }
 
     protected function registerTools(): void
