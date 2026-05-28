@@ -54,6 +54,11 @@ class WhisperSpeakerEntityLinkProvider implements EntityLinkProvider
         return [];
     }
 
+    public function metrics(string $morphAlias, array $linksByEntity): array
+    {
+        return [];
+    }
+
     public function activityChildren(string $morphAlias, array $linkableIds): array
     {
         return [];
