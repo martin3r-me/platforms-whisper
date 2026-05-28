@@ -91,6 +91,7 @@ class GetRecordingTool implements ToolContract, ToolMetadataContract
                     'name' => $entity->name,
                     'type' => $entity->type?->name,
                 ] : null,
+                'files' => $rec->getFileReferencesArray(),
                 'recorded_at' => $rec->recorded_at?->toISOString(),
                 'created_at' => $rec->created_at?->toISOString(),
                 'updated_at' => $rec->updated_at?->toISOString(),
