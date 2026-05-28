@@ -27,6 +27,8 @@ class WhisperRecording extends Model
         'transcript',
         'summary',
         'action_items',
+        'outline',
+        'ai_suggestions',
         'segments',
         'speakers_count',
         'speaker_map',
@@ -35,8 +37,11 @@ class WhisperRecording extends Model
         'file_size_bytes',
         'model',
         'provider_id',
+        'device_serial',
+        'source_url',
         'status',
         'error_message',
+        'recorded_at',
     ];
 
     protected $casts = [
@@ -45,6 +50,8 @@ class WhisperRecording extends Model
         'speakers_count' => 'integer',
         'segments' => 'array',
         'speaker_map' => 'array',
+        'outline' => 'array',
+        'recorded_at' => 'datetime',
     ];
 
     protected static function booted(): void
@@ -72,6 +79,11 @@ class WhisperRecording extends Model
     public function questions(): HasMany
     {
         return $this->hasMany(WhisperQuestion::class, 'whisper_recording_id');
+    }
+
+    public function segmentRows(): HasMany
+    {
+        return $this->hasMany(WhisperSegment::class, 'whisper_recording_id');
     }
 
     public function scopeForTeam($query, int $teamId)

@@ -7,6 +7,8 @@ use Platform\Core\Contracts\ToolContext;
 use Platform\Core\Contracts\ToolMetadataContract;
 use Platform\Core\Contracts\ToolResult;
 use Platform\Whisper\Models\WhisperRecording;
+use Platform\Whisper\Models\WhisperSegment;
+use Platform\Whisper\Models\WhisperSpeaker;
 use Platform\Whisper\Tools\Concerns\ResolvesWhisperTeam;
 
 class AppendSegmentsTool implements ToolContract, ToolMetadataContract
@@ -20,7 +22,7 @@ class AppendSegmentsTool implements ToolContract, ToolMetadataContract
 
     public function getDescription(): string
     {
-        return 'APPEND /whisper/recordings/{id}/segments - Hängt Segmente in Batches an eine bestehende Recording an. Max ~50 Segmente pro Call. Bei is_last_batch=true wird der Transcript-Text aus allen Segmenten zusammengebaut und die Recording finalisiert.';
+        return 'APPEND /whisper/recordings/{id}/segments - Hängt Segmente in Batches an eine bestehende Recording an. Max ~50 Segmente pro Call. Bei is_last_batch=true wird der Transcript-Text aus allen Segmenten zusammengebaut und die Recording finalisiert. Unterstützt embedding_key pro Segment für automatische Speaker-Zuordnung.';
     }
 
     public function getSchema(): array
@@ -38,7 +40,7 @@ class AppendSegmentsTool implements ToolContract, ToolMetadataContract
                 ],
                 'segments' => [
                     'type' => 'array',
-                    'description' => 'Speaker-Segmente (max ~50 pro Call). Array von Objekten mit: speaker (string), start (float, Sekunden), end (float, Sekunden), text (string).',
+                    'description' => 'Speaker-Segmente (max ~50 pro Call). Array von Objekten mit: speaker (string), start (float, Sekunden), end (float, Sekunden), text (string), embedding_key (string, optional: Plaud Voice-UUID).',
                     'items' => [
                         'type' => 'object',
                         'properties' => [
@@ -46,6 +48,10 @@ class AppendSegmentsTool implements ToolContract, ToolMetadataContract
                             'start' => ['type' => 'number'],
                             'end' => ['type' => 'number'],
                             'text' => ['type' => 'string'],
+                            'embedding_key' => [
+                                'type' => 'string',
+                                'description' => 'Optional: Plaud Voice-UUID zur automatischen Speaker-Erkennung.',
+                            ],
                         ],
                     ],
                 ],
@@ -88,7 +94,38 @@ class AppendSegmentsTool implements ToolContract, ToolMetadataContract
                 return ToolResult::error('NOT_FOUND', "Recording #{$recordingId} nicht gefunden oder kein Zugriff.");
             }
 
-            // Existing segments
+            // --- Speaker Resolution ---
+            $embeddingKeys = [];
+            foreach ($segments as $seg) {
+                $key = trim($seg['embedding_key'] ?? '');
+                if ($key !== '') {
+                    $embeddingKeys[$key] = true;
+                }
+            }
+
+            $speakersByEmbedding = [];
+            if (!empty($embeddingKeys)) {
+                $existingSpeakers = WhisperSpeaker::query()
+                    ->where('team_id', $teamId)
+                    ->whereIn('embedding_key', array_keys($embeddingKeys))
+                    ->get()
+                    ->keyBy('embedding_key');
+
+                foreach ($embeddingKeys as $key => $_) {
+                    if ($existingSpeakers->has($key)) {
+                        $speakersByEmbedding[$key] = $existingSpeakers->get($key);
+                    } else {
+                        $speakersByEmbedding[$key] = WhisperSpeaker::create([
+                            'team_id' => $teamId,
+                            'name' => 'Speaker ' . (count($speakersByEmbedding) + 1),
+                            'embedding_key' => $key,
+                            'source' => 'plaud',
+                        ]);
+                    }
+                }
+            }
+
+            // --- Existing segments (JSON legacy) ---
             $existingSegments = $recording->segments ?? [];
 
             // Build index of existing start times for dedup
@@ -97,18 +134,51 @@ class AppendSegmentsTool implements ToolContract, ToolMetadataContract
                 $existingStarts[(string) ($seg['start'] ?? '')] = true;
             }
 
-            // Append new segments, skip duplicates by start time
+            // Current sort_order offset for whisper_segments table
+            $sortOrder = WhisperSegment::where('whisper_recording_id', $recording->id)->max('sort_order') ?? 0;
+
+            // Append new segments (dual-write: JSON + table)
             $added = 0;
             $skipped = 0;
+            $segmentRows = [];
+
             foreach ($segments as $seg) {
                 $startKey = (string) ($seg['start'] ?? '');
                 if (isset($existingStarts[$startKey])) {
                     $skipped++;
                     continue;
                 }
+
+                // JSON legacy write
                 $existingSegments[] = $seg;
                 $existingStarts[$startKey] = true;
                 $added++;
+                $sortOrder++;
+
+                // Table write
+                $embeddingKey = trim($seg['embedding_key'] ?? '');
+                $speakerId = null;
+                if ($embeddingKey !== '' && isset($speakersByEmbedding[$embeddingKey])) {
+                    $speakerId = $speakersByEmbedding[$embeddingKey]->id;
+                }
+
+                $segmentRows[] = [
+                    'whisper_recording_id' => $recording->id,
+                    'whisper_speaker_id' => $speakerId,
+                    'speaker_label' => (string) ($seg['speaker'] ?? 'A'),
+                    'text' => (string) ($seg['text'] ?? ''),
+                    'start_seconds' => (float) ($seg['start'] ?? 0),
+                    'end_seconds' => (float) ($seg['end'] ?? 0),
+                    'embedding_key' => $embeddingKey !== '' ? $embeddingKey : null,
+                    'sort_order' => $sortOrder,
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ];
+            }
+
+            // Bulk insert segment rows
+            if (!empty($segmentRows)) {
+                WhisperSegment::insert($segmentRows);
             }
 
             $recording->segments = $existingSegments;
@@ -147,6 +217,15 @@ class AppendSegmentsTool implements ToolContract, ToolMetadataContract
                 'segments_total' => $totalSegments,
                 'is_last_batch' => $isLastBatch,
             ];
+
+            if (!empty($speakersByEmbedding)) {
+                $result['speakers_resolved'] = array_map(fn ($s) => [
+                    'id' => $s->id,
+                    'uuid' => $s->uuid,
+                    'name' => $s->name,
+                    'embedding_key' => $s->embedding_key,
+                ], array_values($speakersByEmbedding));
+            }
 
             if ($isLastBatch) {
                 $result['status'] = 'completed';

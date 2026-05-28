@@ -66,7 +66,23 @@ class ImportRecordingTool implements ToolContract, ToolMetadataContract
                 ],
                 'recorded_at' => [
                     'type' => 'string',
-                    'description' => 'Optional: Zeitpunkt der Aufnahme (ISO 8601). Wird als created_at gesetzt.',
+                    'description' => 'Optional: Zeitpunkt der Aufnahme (ISO 8601).',
+                ],
+                'outline' => [
+                    'type' => 'array',
+                    'description' => 'Optional: Gliederung/Outline (Array von Strings oder Objekten).',
+                ],
+                'ai_suggestions' => [
+                    'type' => 'string',
+                    'description' => 'Optional: KI-generierte Vorschläge/Empfehlungen.',
+                ],
+                'device_serial' => [
+                    'type' => 'string',
+                    'description' => 'Optional: Seriennummer des Aufnahmegeräts.',
+                ],
+                'source_url' => [
+                    'type' => 'string',
+                    'description' => 'Optional: URL zur Quell-Aufnahme.',
                 ],
             ],
             'required' => ['title', 'source', 'source_id'],
@@ -115,29 +131,33 @@ class ImportRecordingTool implements ToolContract, ToolMetadataContract
 
             $speakerMap = $arguments['speaker_map'] ?? null;
 
+            $recordedAt = null;
+            if (!empty($arguments['recorded_at'])) {
+                try {
+                    $recordedAt = \Carbon\Carbon::parse($arguments['recorded_at']);
+                } catch (\Throwable) {
+                    // Ignore invalid date
+                }
+            }
+
             $recording = WhisperRecording::create([
                 'team_id' => $teamId,
                 'created_by_user_id' => $context->user?->id,
                 'title' => $title,
                 'summary' => isset($arguments['summary']) ? trim($arguments['summary']) : null,
                 'action_items' => isset($arguments['action_items']) ? trim($arguments['action_items']) : null,
+                'outline' => $arguments['outline'] ?? null,
+                'ai_suggestions' => isset($arguments['ai_suggestions']) ? trim($arguments['ai_suggestions']) : null,
                 'speaker_map' => $speakerMap,
                 'language' => $arguments['language'] ?? 'de',
                 'duration_seconds' => isset($arguments['duration_seconds']) ? (int) $arguments['duration_seconds'] : null,
                 'model' => 'import:' . $source,
                 'provider_id' => $providerId,
+                'device_serial' => isset($arguments['device_serial']) ? trim($arguments['device_serial']) : null,
+                'source_url' => isset($arguments['source_url']) ? trim($arguments['source_url']) : null,
+                'recorded_at' => $recordedAt,
                 'status' => WhisperRecording::STATUS_PROCESSING,
             ]);
-
-            // Set created_at to recorded_at if provided
-            if (!empty($arguments['recorded_at'])) {
-                try {
-                    $recording->created_at = \Carbon\Carbon::parse($arguments['recorded_at']);
-                    $recording->saveQuietly();
-                } catch (\Throwable) {
-                    // Ignore invalid date
-                }
-            }
 
             return ToolResult::success([
                 'recording_id' => $recording->id,

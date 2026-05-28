@@ -23,7 +23,7 @@ class UpdateRecordingTool implements ToolContract, ToolMetadataContract
 
     public function getDescription(): string
     {
-        return 'PUT /whisper/recordings - Aktualisiert eine Aufnahme. ERFORDERLICH: recording_id. Optional: title, transcript, language.';
+        return 'PUT /whisper/recordings - Aktualisiert eine Aufnahme. ERFORDERLICH: recording_id. Optional: title, transcript, language, summary, action_items, duration_seconds, outline, ai_suggestions, device_serial, recorded_at, source_url.';
     }
 
     public function getSchema(): array
@@ -49,6 +49,38 @@ class UpdateRecordingTool implements ToolContract, ToolMetadataContract
                 'language' => [
                     'type' => 'string',
                     'description' => 'Optional: ISO-Sprachcode (z.B. "de", "en").',
+                ],
+                'summary' => [
+                    'type' => 'string',
+                    'description' => 'Optional: Zusammenfassung (Markdown).',
+                ],
+                'action_items' => [
+                    'type' => 'string',
+                    'description' => 'Optional: Action Items (Markdown).',
+                ],
+                'duration_seconds' => [
+                    'type' => 'integer',
+                    'description' => 'Optional: Dauer in Sekunden.',
+                ],
+                'outline' => [
+                    'type' => 'array',
+                    'description' => 'Optional: Gliederung/Outline (Array von Strings oder Objekten).',
+                ],
+                'ai_suggestions' => [
+                    'type' => 'string',
+                    'description' => 'Optional: KI-generierte Vorschläge/Empfehlungen.',
+                ],
+                'device_serial' => [
+                    'type' => 'string',
+                    'description' => 'Optional: Seriennummer des Aufnahmegeräts.',
+                ],
+                'recorded_at' => [
+                    'type' => 'string',
+                    'description' => 'Optional: Zeitpunkt der Aufnahme (ISO 8601).',
+                ],
+                'source_url' => [
+                    'type' => 'string',
+                    'description' => 'Optional: URL zur Quell-Aufnahme.',
                 ],
             ],
             'required' => ['recording_id'],
@@ -78,7 +110,7 @@ class UpdateRecordingTool implements ToolContract, ToolMetadataContract
             }
 
             $payload = [];
-            foreach (['title', 'transcript', 'language'] as $field) {
+            foreach (['title', 'transcript', 'language', 'summary', 'action_items', 'duration_seconds', 'outline', 'ai_suggestions', 'device_serial', 'recorded_at', 'source_url'] as $field) {
                 if (array_key_exists($field, $arguments)) {
                     $payload[$field] = $arguments[$field];
                 }

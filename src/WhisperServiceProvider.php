@@ -24,6 +24,7 @@ class WhisperServiceProvider extends ServiceProvider
         // Morph-Map-Alias für Organization-Verknüpfungen
         Relation::morphMap([
             'whisper_recording' => \Platform\Whisper\Models\WhisperRecording::class,
+            'whisper_speaker' => \Platform\Whisper\Models\WhisperSpeaker::class,
         ]);
 
         if (
@@ -60,8 +61,9 @@ class WhisperServiceProvider extends ServiceProvider
 
         // EntityLinkProvider for Organization snapshots
         try {
-            resolve(\Platform\Organization\Services\EntityLinkRegistry::class)
-                ->register(new \Platform\Whisper\Organization\WhisperEntityLinkProvider());
+            $linkRegistry = resolve(\Platform\Organization\Services\EntityLinkRegistry::class);
+            $linkRegistry->register(new \Platform\Whisper\Organization\WhisperEntityLinkProvider());
+            $linkRegistry->register(new \Platform\Whisper\Organization\WhisperSpeakerEntityLinkProvider());
         } catch (\Throwable $e) {
             // Organization-Modul nicht geladen
         }
