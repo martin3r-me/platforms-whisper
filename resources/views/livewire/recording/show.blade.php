@@ -21,8 +21,8 @@
             <x-ui-panel title="Details">
                 <div class="p-4 grid grid-cols-2 md:grid-cols-5 gap-4 text-sm">
                     <div>
-                        <div class="text-[var(--ui-muted)] text-xs uppercase">Datum</div>
-                        <div class="font-medium">{{ $recording->created_at->format('d.m.Y H:i') }}</div>
+                        <div class="text-[var(--ui-muted)] text-xs uppercase">Aufgenommen</div>
+                        <div class="font-medium">{{ ($recording->recorded_at ?? $recording->created_at)->format('d.m.Y H:i') }}</div>
                     </div>
                     <div>
                         <div class="text-[var(--ui-muted)] text-xs uppercase">Dauer</div>
@@ -83,6 +83,65 @@
                 <x-ui-panel title="Action Items">
                     <div class="p-4">
                         <div class="whitespace-pre-wrap text-sm leading-relaxed text-[var(--ui-fg)]">{{ $recording->action_items }}</div>
+                    </div>
+                </x-ui-panel>
+            @endif
+
+            {{-- Outline (falls vorhanden) --}}
+            @if($recording->outline && is_array($recording->outline) && count($recording->outline) > 0)
+                <x-ui-panel title="Gliederung">
+                    <div class="p-4">
+                        <ul class="space-y-1 text-sm leading-relaxed text-[var(--ui-fg)]">
+                            @foreach($recording->outline as $item)
+                                <li class="flex gap-2">
+                                    <span class="text-[var(--ui-muted)] flex-shrink-0">{{ $loop->iteration }}.</span>
+                                    <span>{{ is_array($item) ? ($item['title'] ?? ($item['text'] ?? json_encode($item))) : $item }}</span>
+                                </li>
+                            @endforeach
+                        </ul>
+                    </div>
+                </x-ui-panel>
+            @endif
+
+            {{-- AI Suggestions (falls vorhanden) --}}
+            @if($recording->ai_suggestions)
+                <x-ui-panel title="KI-Empfehlungen">
+                    <div class="p-4">
+                        <div class="whitespace-pre-wrap text-sm leading-relaxed text-[var(--ui-fg)]">{{ $recording->ai_suggestions }}</div>
+                    </div>
+                </x-ui-panel>
+            @endif
+
+            {{-- Dateien / Anhänge --}}
+            @php
+                $files = $recording->getFileReferencesArray();
+            @endphp
+            @if(count($files) > 0)
+                <x-ui-panel title="Anhänge">
+                    <div class="p-4">
+                        <div class="space-y-2">
+                            @foreach($files as $file)
+                                <a href="{{ $file['url'] ?? '#' }}"
+                                   target="_blank"
+                                   class="flex items-center gap-3 p-3 rounded-lg border border-[var(--ui-border)] hover:bg-[var(--ui-muted-5)] transition text-sm">
+                                    @if($file['thumbnail'] ?? null)
+                                        <img src="{{ $file['thumbnail'] }}" alt="" class="w-10 h-10 rounded object-cover flex-shrink-0">
+                                    @else
+                                        <div class="w-10 h-10 rounded bg-[var(--ui-muted-5)] flex items-center justify-center flex-shrink-0">
+                                            <svg class="w-5 h-5 text-[var(--ui-muted)]" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m2.25 0H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z" />
+                                            </svg>
+                                        </div>
+                                    @endif
+                                    <div class="flex-1 min-w-0">
+                                        <div class="font-medium text-[var(--ui-fg)] truncate">{{ $file['title'] ?: 'Datei' }}</div>
+                                    </div>
+                                    <svg class="w-4 h-4 text-[var(--ui-muted)] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
+                                    </svg>
+                                </a>
+                            @endforeach
+                        </div>
                     </div>
                 </x-ui-panel>
             @endif
@@ -293,18 +352,38 @@
             <div class="p-4 space-y-3 text-sm">
                 <div>
                     <div class="text-xs uppercase text-[var(--ui-muted)]">Modell</div>
-                    <div class="font-medium">{{ $recording->model }}</div>
+                    <div class="font-medium">{{ $recording->model ?: '—' }}</div>
                 </div>
                 <div>
                     <div class="text-xs uppercase text-[var(--ui-muted)]">Erstellt</div>
                     <div class="font-medium">{{ $recording->created_at->diffForHumans() }}</div>
                 </div>
+                @if($recording->recorded_at && $recording->recorded_at->ne($recording->created_at))
+                    <div>
+                        <div class="text-xs uppercase text-[var(--ui-muted)]">Aufgenommen</div>
+                        <div class="font-medium">{{ $recording->recorded_at->format('d.m.Y H:i') }}</div>
+                    </div>
+                @endif
                 <div>
                     <div class="text-xs uppercase text-[var(--ui-muted)]">Datei-Größe</div>
                     <div class="font-medium">
                         {{ $recording->file_size_bytes ? number_format($recording->file_size_bytes / 1024 / 1024, 2, ',', '.').' MB' : '—' }}
                     </div>
                 </div>
+                @if($recording->device_serial)
+                    <div>
+                        <div class="text-xs uppercase text-[var(--ui-muted)]">Gerät</div>
+                        <div class="font-medium font-mono text-xs">{{ $recording->device_serial }}</div>
+                    </div>
+                @endif
+                @if($recording->source_url)
+                    <div>
+                        <div class="text-xs uppercase text-[var(--ui-muted)]">Quelle</div>
+                        <div>
+                            <a href="{{ $recording->source_url }}" target="_blank" class="text-[var(--ui-primary)] hover:underline truncate block">Zur Quelle</a>
+                        </div>
+                    </div>
+                @endif
             </div>
         </x-ui-page-sidebar>
     </x-slot>
