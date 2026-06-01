@@ -24,7 +24,11 @@ class PlaudSyncTool implements ToolContract, ToolMetadataContract
 
     public function getDescription(): string
     {
-        return 'POST /whisper/plaud/sync - Importiert eine vollständige Plaud-Aufnahme in einem Schritt. Nimmt file metadata, note content und transcript segments entgegen, parst die Note automatisch in Summary/Action Items/AI Suggestions, resolved Speakers und erstellt Recording + Segments atomar. Duplikat-Erkennung via file_id.';
+        return 'POST /whisper/plaud/sync - Importiert eine komplette Plaud-Aufnahme atomar in einem Call. '
+            . 'Erwartet: file_id, title, note_content (Markdown aus get_note), segments (Array aus get_transcript), metadata (start_at, duration_ms, serial_number). '
+            . 'Automatisch geparst aus note_content: Summary, Action Items, AI Suggestions, Outline. '
+            . 'Speaker werden automatisch via embedding_key resolved/erstellt. '
+            . 'Duplikat-Erkennung via file_id. Entity-Verknuepfung NICHT hier — danach via organization.dimension_links.POST.';
     }
 
     public function getSchema(): array
@@ -56,7 +60,7 @@ class PlaudSyncTool implements ToolContract, ToolMetadataContract
                         'properties' => [
                             'content' => [
                                 'type' => 'string',
-                                'description' => 'Gesprochener Text des Segments.',
+                                'description' => 'Gesprochener Text des Segments. Alternativ auch als "text" akzeptiert.',
                             ],
                             'start_time' => [
                                 'type' => 'integer',
@@ -83,7 +87,7 @@ class PlaudSyncTool implements ToolContract, ToolMetadataContract
                 ],
                 'metadata' => [
                     'type' => 'object',
-                    'description' => 'Aufnahme-Metadaten.',
+                    'description' => 'Aufnahme-Metadaten aus get_file.',
                     'properties' => [
                         'serial_number' => [
                             'type' => 'string',
@@ -91,7 +95,7 @@ class PlaudSyncTool implements ToolContract, ToolMetadataContract
                         ],
                         'start_at' => [
                             'type' => 'string',
-                            'description' => 'Aufnahme-Start als ISO-8601 Zeitstempel.',
+                            'description' => 'Aufnahme-Start als ISO-8601 Zeitstempel. Alternativ auch als "recorded_at" akzeptiert.',
                         ],
                         'duration_ms' => [
                             'type' => 'integer',
@@ -163,9 +167,10 @@ class PlaudSyncTool implements ToolContract, ToolMetadataContract
             // 4. Map metadata
             $deviceSerial = isset($metadata['serial_number']) ? trim((string) $metadata['serial_number']) : null;
             $recordedAt = null;
-            if (!empty($metadata['start_at'])) {
+            $recordedAtRaw = $metadata['start_at'] ?? $metadata['recorded_at'] ?? null;
+            if (!empty($recordedAtRaw)) {
                 try {
-                    $recordedAt = Carbon::parse($metadata['start_at']);
+                    $recordedAt = Carbon::parse($recordedAtRaw);
                 } catch (\Throwable) {
                     // Ignore invalid date
                 }
@@ -264,7 +269,7 @@ class PlaudSyncTool implements ToolContract, ToolMetadataContract
             $sortOrder = 0;
 
             foreach ($segments as $seg) {
-                $content = trim((string) ($seg['content'] ?? ''));
+                $content = trim((string) ($seg['content'] ?? $seg['text'] ?? ''));
                 $originalSpeaker = trim((string) ($seg['original_speaker'] ?? ''));
                 $speakerName = trim((string) ($seg['speaker'] ?? ''));
                 $embeddingKey = trim((string) ($seg['embeddingKey'] ?? ''));

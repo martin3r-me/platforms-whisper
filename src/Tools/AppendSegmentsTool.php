@@ -22,7 +22,11 @@ class AppendSegmentsTool implements ToolContract, ToolMetadataContract
 
     public function getDescription(): string
     {
-        return 'APPEND /whisper/recordings/{id}/segments - Hängt Segmente in Batches an eine bestehende Recording an. Max ~50 Segmente pro Call. Bei is_last_batch=true wird der Transcript-Text aus allen Segmenten zusammengebaut und die Recording finalisiert. Unterstützt embedding_key pro Segment für automatische Speaker-Zuordnung.';
+        return 'APPEND /whisper/recordings/{id}/segments - Haengt Segmente in Batches an eine bestehende Recording an (erstellt via whisper.recordings.import.POST). '
+            . 'Max ~50 Segmente pro Call. Format: speaker (Label), start/end (float, Sekunden), text (string), embedding_key (optional). '
+            . 'Dedup via start-Zeit: Segmente mit gleichem start werden uebersprungen — ausser das bestehende Segment hat leeren Text, dann wird es aktualisiert. '
+            . 'WICHTIG: Letzten Batch mit is_last_batch=true senden — das finalisiert die Recording (baut Transcript, zaehlt Speaker, setzt status=completed). '
+            . 'Fuer Plaud-Import empfohlen: whisper.plaud.sync.POST (ein Call statt mehrere).';
     }
 
     public function getSchema(): array
@@ -128,10 +132,13 @@ class AppendSegmentsTool implements ToolContract, ToolMetadataContract
             // --- Existing segments (JSON legacy) ---
             $existingSegments = $recording->segments ?? [];
 
-            // Build index of existing start times for dedup
+            // Build index of existing start times for dedup (track text content)
             $existingStarts = [];
-            foreach ($existingSegments as $seg) {
-                $existingStarts[(string) ($seg['start'] ?? '')] = true;
+            foreach ($existingSegments as $idx => $seg) {
+                $existingStarts[(string) ($seg['start'] ?? '')] = [
+                    'index' => $idx,
+                    'has_text' => trim((string) ($seg['text'] ?? '')) !== '',
+                ];
             }
 
             // Current sort_order offset for whisper_segments table
@@ -142,16 +149,27 @@ class AppendSegmentsTool implements ToolContract, ToolMetadataContract
             $skipped = 0;
             $segmentRows = [];
 
+            $updated = 0;
+
             foreach ($segments as $seg) {
                 $startKey = (string) ($seg['start'] ?? '');
+                $newText = trim((string) ($seg['text'] ?? ''));
+
                 if (isset($existingStarts[$startKey])) {
-                    $skipped++;
+                    // Allow overwrite if existing segment has empty text and new one has content
+                    if (!$existingStarts[$startKey]['has_text'] && $newText !== '') {
+                        $existingSegments[$existingStarts[$startKey]['index']] = $seg;
+                        $existingStarts[$startKey]['has_text'] = true;
+                        $updated++;
+                    } else {
+                        $skipped++;
+                    }
                     continue;
                 }
 
                 // JSON legacy write
                 $existingSegments[] = $seg;
-                $existingStarts[$startKey] = true;
+                $existingStarts[$startKey] = ['index' => count($existingSegments) - 1, 'has_text' => $newText !== ''];
                 $added++;
                 $sortOrder++;
 
@@ -179,6 +197,25 @@ class AppendSegmentsTool implements ToolContract, ToolMetadataContract
             // Bulk insert segment rows
             if (!empty($segmentRows)) {
                 WhisperSegment::insert($segmentRows);
+            }
+
+            // Update table rows for overwritten segments (empty text → new text)
+            if ($updated > 0) {
+                foreach ($segments as $seg) {
+                    $startSeconds = (float) ($seg['start'] ?? 0);
+                    $newText = trim((string) ($seg['text'] ?? ''));
+                    if ($newText === '') {
+                        continue;
+                    }
+
+                    WhisperSegment::where('whisper_recording_id', $recording->id)
+                        ->where('start_seconds', $startSeconds)
+                        ->where('text', '')
+                        ->update([
+                            'text' => $newText,
+                            'updated_at' => now(),
+                        ]);
+                }
             }
 
             $recording->segments = $existingSegments;
@@ -213,6 +250,7 @@ class AppendSegmentsTool implements ToolContract, ToolMetadataContract
             $result = [
                 'recording_id' => $recording->id,
                 'segments_added' => $added,
+                'segments_updated' => $updated,
                 'segments_skipped' => $skipped,
                 'segments_total' => $totalSegments,
                 'is_last_batch' => $isLastBatch,

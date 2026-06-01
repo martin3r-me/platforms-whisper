@@ -20,7 +20,11 @@ class ImportRecordingTool implements ToolContract, ToolMetadataContract
 
     public function getDescription(): string
     {
-        return 'POST /whisper/recordings/import - Importiert eine externe Aufnahme (z.B. von Plaud) mit Metadaten, Summary und Action Items. Segmente werden separat via whisper.recordings.segments.APPEND in Batches angehängt. Duplikat-Erkennung via source + source_id.';
+        return 'POST /whisper/recordings/import - Generischer Multi-Step-Import: Legt Recording mit Metadaten an (Step 1). '
+            . 'Segmente danach via whisper.recordings.segments.APPEND in Batches anhaengen (Step 2). '
+            . 'Letzten APPEND-Call mit is_last_batch=true finalisieren (Step 3). '
+            . 'Duplikat-Erkennung via source + source_id. '
+            . 'Fuer Plaud-Import empfohlen: whisper.plaud.sync.POST (ein Call statt drei Steps).';
     }
 
     public function getSchema(): array

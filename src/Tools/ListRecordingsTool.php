@@ -79,10 +79,12 @@ class ListRecordingsTool implements ToolContract, ToolMetadataContract
                     'duration_seconds' => $rec->duration_seconds,
                     'status' => $rec->status,
                     'speakers_count' => $rec->speakers_count,
+                    'model' => $rec->model,
                     'file_size_bytes' => $rec->file_size_bytes,
                     'transcript_length' => mb_strlen((string) $rec->transcript),
                     'team_id' => $rec->team_id,
                     'created_by_user_id' => $rec->created_by_user_id,
+                    'recorded_at' => $rec->recorded_at?->toISOString(),
                     'created_at' => $rec->created_at?->toISOString(),
                     'updated_at' => $rec->updated_at?->toISOString(),
                 ];

@@ -16,7 +16,7 @@ class WhisperOverviewTool implements ToolContract, ToolMetadataContract
 
     public function getDescription(): string
     {
-        return 'GET /whisper/overview - Zeigt Uebersicht ueber das Whisper-Modul (Konzepte, Datenmodell, verfuegbare Tools). Whisper ist ein Audio-Transkriptions-Modul: Browser-Recorder -> AssemblyAI (Transcript + Speaker Diarization) -> LeMUR (Titel + Summary + Action Items + Q&A). Audio wird nicht persistiert.';
+        return 'GET /whisper/overview - Zeigt Uebersicht ueber das Whisper-Modul: Datenmodell, Import-Workflows, verfuegbare Tools. IMMER ZUERST aufrufen bevor andere Whisper-Tools genutzt werden.';
     }
 
     public function getSchema(): array
@@ -37,56 +37,94 @@ class WhisperOverviewTool implements ToolContract, ToolMetadataContract
                     'team_scoped' => true,
                     'team_id_source' => 'ToolContext.team bzw. team_id Parameter',
                 ],
-                'concepts' => [
+                'data_model' => [
                     'whisper_recordings' => [
-                        'model' => 'Platform\\Whisper\\Models\\WhisperRecording',
-                        'table' => 'whisper_recordings',
+                        'description' => 'Aufnahme mit Transkript, Summary, Action Items, Outline, AI Suggestions. Kann via Browser-Recorder (AssemblyAI) oder Import (Plaud, extern) erstellt werden.',
                         'key_fields' => [
-                            'id', 'uuid', 'team_id', 'created_by_user_id',
-                            'title', 'transcript', 'summary', 'action_items',
-                            'segments', 'speakers_count', 'speaker_map',
-                            'language', 'duration_seconds',
-                            'model', 'provider_id', 'status', 'error_message',
-                            'file_size_bytes',
+                            'id', 'uuid', 'team_id', 'title', 'transcript',
+                            'summary', 'action_items', 'outline', 'ai_suggestions',
+                            'segments (JSON legacy)', 'speakers_count', 'speaker_map',
+                            'language', 'duration_seconds', 'recorded_at',
+                            'model', 'provider_id', 'device_serial', 'source_url',
+                            'status', 'error_message',
                         ],
-                        'note' => 'Audio-Aufnahme wird im Browser via MediaRecorder erstellt, an AssemblyAI gesendet (Transcription + Speaker Diarization). Anschliessend laeuft AssemblyAI LeMUR (Claude/Anthropic) ueber dem Transkript und generiert Titel, Summary und Action Items. Audio-Datei wird nach Verarbeitung verworfen. provider_id = AssemblyAI transcript id (wird fuer LeMUR-Calls weiterverwendet).',
+                        'status_funnel' => [
+                            'pending' => 'Erstellt, wartet auf Verarbeitung.',
+                            'processing' => 'Import/Transkription laeuft, Segmente werden angehaengt.',
+                            'completed' => 'Fertig: Transkript, Segmente, Summary vorhanden.',
+                            'failed' => 'Fehler. error_message enthaelt Details.',
+                        ],
+                    ],
+                    'whisper_segments' => [
+                        'description' => 'Einzelne Transkript-Segmente (Tabellenzeilen). Jedes Segment gehoert zu einer Recording und optional zu einem Speaker.',
+                        'key_fields' => [
+                            'whisper_recording_id', 'whisper_speaker_id (nullable)',
+                            'speaker_label (A, B, C...)', 'text',
+                            'start_seconds (float)', 'end_seconds (float)',
+                            'embedding_key (Plaud Voice-UUID)', 'sort_order',
+                        ],
+                        'note' => 'Segmente werden parallel als JSON-Array in whisper_recordings.segments gespeichert (legacy) UND als Zeilen in whisper_segments (normalisiert).',
+                    ],
+                    'whisper_speakers' => [
+                        'description' => 'Wiedererkennbare Sprecher pro Team. Werden ueber embedding_key (Plaud Voice-UUID) automatisch zugeordnet.',
+                        'key_fields' => [
+                            'id', 'uuid', 'team_id', 'name',
+                            'embedding_key (unique pro Team)', 'source (plaud, manual)',
+                        ],
                     ],
                 ],
-                'status_funnel' => [
-                    'pending' => 'Aufnahme hochgeladen, Job in Queue.',
-                    'processing' => 'Upload zu AssemblyAI, Polling bis fertig.',
-                    'completed' => 'Transkript fertig, inkl. Sprecher-Segmente und Summary.',
-                    'failed' => 'Fehler waehrend Verarbeitung. error_message enthaelt Details.',
-                ],
-                'features' => [
-                    'speaker_diarization' => 'AssemblyAI liefert speaker_labels; Segmente mit speaker/start/end/text landen in Spalte segments. speakers_count zaehlt die erkannten Sprecher. speaker_map erlaubt manuelles Benennen der Sprecher in der UI.',
-                    'lemur_insights' => 'Nach Transkription ruft AssemblyAiLemurService /lemur/v3/generate/task auf und generiert in einem einzigen Call Titel + Summary + Action Items (Claude/Anthropic unter der Haube).',
-                    'lemur_qa' => 'Ueber whisper.recording.question.POST kann eine beliebige Frage an das Transkript gestellt werden (LeMUR Q&A, nutzt provider_id als transcript_id).',
-                    'queue_based' => 'Upload kehrt sofort zurueck, TranscribeRecordingJob verarbeitet im Hintergrund (timeout 1800s).',
-                    'audio_discarded' => 'Audio-Datei wird nach Transkription geloescht. Nur Transkript + Segmente + Insights bleiben persistent.',
-                ],
-                'segments_schema' => [
-                    'type' => 'array<object>',
-                    'item' => [
-                        'speaker' => 'A, B, C... (AssemblyAI labels)',
-                        'start' => 'float seconds',
-                        'end' => 'float seconds',
-                        'text' => 'string',
+                'import_workflows' => [
+                    'plaud_single_call' => [
+                        'tool' => 'whisper.plaud.sync.POST',
+                        'description' => 'EMPFOHLEN fuer Plaud-Import. Ein einziger Call importiert alles atomar: Metadaten, Note (wird automatisch in Summary/Action Items/Outline/AI Suggestions geparst), Transcript-Segmente, Speaker-Resolution. Duplikat-Erkennung via file_id.',
+                        'auto_parsed_from_note_content' => [
+                            'summary' => 'Aus Markdown-Section "## Zusammenfassung"',
+                            'action_items' => 'Aus Markdown-Section "## Nächste Vereinbarungen"',
+                            'ai_suggestions' => 'Aus Markdown-Section "## KI-Vorschläge"',
+                            'outline' => 'Aus Markdown-Section "## Besprechungsinformationen" (Key-Value Paare)',
+                        ],
+                    ],
+                    'multi_step_import' => [
+                        'step_1' => 'whisper.recordings.import.POST - Recording anlegen mit Metadaten',
+                        'step_2' => 'whisper.recordings.segments.APPEND - Segmente in Batches (max ~50) anhaengen',
+                        'step_3' => 'APPEND mit is_last_batch=true - Finalisiert Recording (baut Transcript, zaehlt Speaker)',
+                        'note' => 'Nur noetig wenn note_content nicht als Markdown vorliegt oder Segmente einzeln verarbeitet werden muessen.',
                     ],
                 ],
-                'organization_link' => [
+                'entity_linking' => [
+                    'description' => 'Recordings koennen mit Organization-Entities (Projekt, Kunde, etc.) verknuepft werden.',
                     'morph_alias' => 'whisper_recording',
-                    'note' => 'Aufnahmen koennen mit Organization-Entities (Projekt, Kunde, Abteilung) verknuepft werden via DimensionLink (dimension: entity). Verknuepfung erfolgt ueber organization.dimension_links.POST (morph_alias: whisper_recording).',
+                    'how' => 'NICHT ueber metadata.entity_id! Stattdessen: organization.dimension_links.POST mit morph_alias "whisper_recording" und der Recording-ID.',
+                    'speakers' => 'Speaker koennen ebenfalls verknuepft werden (morph_alias: whisper_speaker).',
                 ],
-                'related_tools' => [
-                    'recordings' => [
-                        'list' => 'whisper.recordings.GET',
-                        'get' => 'whisper.recording.GET',
-                        'update' => 'whisper.recordings.PUT',
-                        'delete' => 'whisper.recordings.DELETE',
-                        'search' => 'whisper.recordings.search.GET',
-                        'transcript' => 'whisper.recording.transcript.GET',
-                        'question' => 'whisper.recording.question.POST',
+                'segments_json_format' => [
+                    'description' => 'Legacy JSON-Format in recordings.segments Spalte. Zeiteinheit: Sekunden.',
+                    'item' => [
+                        'speaker' => 'Label (A, B, C...)',
+                        'text' => 'Gesprochener Text',
+                        'start' => 'float, Sekunden',
+                        'end' => 'float, Sekunden',
+                        'embedding_key' => 'Plaud Voice-UUID (optional)',
+                    ],
+                ],
+                'tools' => [
+                    'import' => [
+                        'whisper.plaud.sync.POST' => 'Plaud-Komplett-Import (empfohlen)',
+                        'whisper.recordings.import.POST' => 'Generischer Import (Step 1: Recording anlegen)',
+                        'whisper.recordings.segments.APPEND' => 'Segmente anhaengen (Step 2+3)',
+                    ],
+                    'read' => [
+                        'whisper.recordings.GET' => 'Liste aller Recordings (Filter, Suche, Paginierung)',
+                        'whisper.recording.GET' => 'Einzelne Recording mit allen Details',
+                        'whisper.recording.transcript.GET' => 'Nur Transkript (fuer LLM-Verarbeitung)',
+                        'whisper.recordings.search.GET' => 'Volltext-Suche in Titeln + Transkripten',
+                    ],
+                    'write' => [
+                        'whisper.recordings.PUT' => 'Recording aktualisieren (Titel, Summary, etc.)',
+                        'whisper.recordings.DELETE' => 'Recording loeschen (nicht reversibel)',
+                    ],
+                    'ai' => [
+                        'whisper.recording.question.POST' => 'Frage an Transkript via LeMUR (nur bei AssemblyAI-Recordings mit provider_id)',
                     ],
                 ],
             ]);
