@@ -67,6 +67,13 @@ class WhisperServiceProvider extends ServiceProvider
         } catch (\Throwable $e) {
             // Organization-Modul nicht geladen
         }
+
+        // Inbox bridge — completed recordings flow into the Inbox triage layer.
+        // Observer guards class_exists internally so this is a no-op when
+        // the Inbox module is absent.
+        \Platform\Whisper\Models\WhisperRecording::observe(
+            \Platform\Whisper\Observers\WhisperRecordingInboxObserver::class,
+        );
     }
 
     protected function registerTools(): void
