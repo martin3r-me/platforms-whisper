@@ -43,10 +43,11 @@ class IngestRecordingToInboxJob implements ShouldQueue
             'audio_recorded_at' => $recording->recorded_at ?? $recording->created_at,
             'speakers' => $this->collectSpeakers($recording),
             'segments' => $this->collectSegments($recording),
-            // audio_file currently unattached — Whisper does not persist audio
-            // by default. A follow-up patch will route the upload through
-            // ContextFileService before the recording job discards it.
-            'audio_file' => null,
+            // Audio reference — TranscribeRecordingJob persists the original
+            // upload via ContextFileService before discarding the tmp file.
+            // We hand the resulting context_file_id over to Inbox, which adds
+            // its own reference (kind=audio_original) on the inbox_item.
+            'audio_file' => $this->resolveAudioReference($recording),
         ];
 
         try {
@@ -57,6 +58,23 @@ class IngestRecordingToInboxJob implements ShouldQueue
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Look up the original-audio ContextFileReference attached to the recording
+     * and hand its context_file_id to Inbox. Returns null when no audio is
+     * persisted yet (older recordings before the persistAudio patch landed).
+     */
+    protected function resolveAudioReference(WhisperRecording $recording): ?array
+    {
+        $ref = $recording->getOrderedFileReferences()
+            ->first(fn ($r) => ($r->meta['kind'] ?? null) === 'audio_original');
+
+        if (!$ref || !$ref->context_file_id) {
+            return null;
+        }
+
+        return ['context_file_id' => (int) $ref->context_file_id];
     }
 
     protected function collectSpeakers(WhisperRecording $recording): array

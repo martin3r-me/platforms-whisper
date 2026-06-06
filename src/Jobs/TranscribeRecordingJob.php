@@ -5,6 +5,7 @@ namespace Platform\Whisper\Jobs;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
@@ -96,7 +97,15 @@ class TranscribeRecordingJob implements ShouldQueue
                 $update['action_items'] = $insights['action_items'];
             }
 
+            // Persist the original audio FIRST, then set status=completed.
+            // The inbox observer fires on the completed transition and
+            // expects the audio reference to already exist on the recording;
+            // otherwise the inbox item gets created without playback.
+            $statusUpdate = $update;
+            unset($update['status']);
             $recording->update($update);
+            $this->persistAudio($recording);
+            $recording->update(['status' => $statusUpdate['status']]);
         } catch (Throwable $e) {
             Log::error('Whisper transcription job failed', [
                 'recording_id' => $this->recordingId,
@@ -127,6 +136,58 @@ class TranscribeRecordingJob implements ShouldQueue
     {
         if (is_file($path)) {
             @unlink($path);
+        }
+    }
+
+    /**
+     * Persist the original audio file via ContextFileService — keeps it on the
+     * platform's default storage disk (S3 in production), under a stable folder
+     * convention. Soft-coupled: if ContextFileService is missing or the file is
+     * already gone, just log and move on (transcript stays usable).
+     */
+    private function persistAudio(WhisperRecording $recording): void
+    {
+        if (!is_file($this->audioPath)) {
+            return;
+        }
+        if (!class_exists(\Platform\Core\Services\ContextFileService::class)) {
+            return;
+        }
+
+        try {
+            $year = $recording->created_at?->format('Y') ?? date('Y');
+            $month = $recording->created_at?->format('m') ?? date('m');
+            $folder = "whisper/audio/{$recording->team_id}/{$year}/{$month}";
+
+            $mime = @mime_content_type($this->audioPath) ?: 'audio/webm';
+            $originalName = 'recording-' . $recording->uuid . '.' . pathinfo($this->audioPath, PATHINFO_EXTENSION);
+
+            // UploadedFile in test mode lets us hand a server-side path to the
+            // service without it complaining about the missing PHP upload check.
+            $file = new UploadedFile($this->audioPath, $originalName, $mime, null, true);
+
+            $result = app(\Platform\Core\Services\ContextFileService::class)->uploadForContext(
+                file: $file,
+                contextType: \Platform\Whisper\Models\WhisperRecording::class,
+                contextId: $recording->id,
+                options: [
+                    'folder' => $folder,
+                    'team_id' => $recording->team_id,
+                    'user_id' => $recording->created_by_user_id,
+                ],
+            );
+
+            if (!empty($result['context_file_id'])) {
+                $recording->addFileReference(
+                    (int) $result['context_file_id'],
+                    ['kind' => 'audio_original', 'persisted_by' => 'TranscribeRecordingJob'],
+                );
+            }
+        } catch (Throwable $e) {
+            Log::warning('Whisper: audio persistence failed', [
+                'recording_id' => $recording->id,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 
