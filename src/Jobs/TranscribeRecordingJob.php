@@ -109,9 +109,15 @@ class TranscribeRecordingJob implements ShouldQueue
             $this->persistAudio($recording);
             $recording->update(['status' => $statusUpdate['status']]);
         } catch (Throwable $e) {
+            $preservedPath = $this->preserveAudioOnFailure($this->audioPath, $recording);
+
             Log::error('Whisper transcription job failed', [
                 'recording_id' => $this->recordingId,
                 'error' => $e->getMessage(),
+                'audio_size_bytes' => is_file($this->audioPath)
+                    ? filesize($this->audioPath)
+                    : null,
+                'preserved_at' => $preservedPath,
                 'trace' => $e->getTraceAsString(),
             ]);
 
@@ -119,9 +125,9 @@ class TranscribeRecordingJob implements ShouldQueue
                 'status' => WhisperRecording::STATUS_FAILED,
                 'error_message' => mb_substr($e->getMessage(), 0, 1000),
             ]);
-        } finally {
-            $this->safeUnlink($this->audioPath);
+            return; // kein finally-unlink — preserveAudioOnFailure hat verschoben
         }
+        $this->safeUnlink($this->audioPath);
     }
 
     public function failed(Throwable $e): void
@@ -139,6 +145,33 @@ class TranscribeRecordingJob implements ShouldQueue
         if (is_file($path)) {
             @unlink($path);
         }
+    }
+
+    /**
+     * Verschiebt das Audio-File auf failure nach storage/app/whisper-failed/,
+     * damit die kaputte Datei für Diagnose erhalten bleibt statt im finally
+     * gelöscht zu werden. Gibt den neuen Pfad zurück (oder null bei Fehler).
+     */
+    private function preserveAudioOnFailure(string $path, WhisperRecording $recording): ?string
+    {
+        if (!is_file($path)) {
+            return null;
+        }
+        try {
+            $dir = storage_path('app/whisper-failed');
+            if (!is_dir($dir)) {
+                @mkdir($dir, 0755, true);
+            }
+            $stamp = date('Ymd-His');
+            $base = $recording->id . '-' . $stamp . '-' . basename($path);
+            $dest = $dir . '/' . $base;
+            if (@rename($path, $dest)) {
+                return $dest;
+            }
+        } catch (Throwable) {
+            // ignore
+        }
+        return null;
     }
 
     /**

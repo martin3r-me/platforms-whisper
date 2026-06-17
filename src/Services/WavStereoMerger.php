@@ -57,10 +57,31 @@ class WavStereoMerger
             $byteRate = $sampleRate * $outChannels * $bytesPerSample;
             $blockAlign = $outChannels * $bytesPerSample;
 
+            // dataSize aus dem Header NICHT blind vertrauen — viele Recorder
+            // (Native macOS, Electron, OBS-Loopback) schreiben den Header
+            // vor Aufnahme-Ende und aktualisieren das Feld nicht oder setzen
+            // 0xFFFFFFFF. Wir klemmen gegen die tatsächliche Restdatei.
+            $leftActual = max(0, (filesize($leftPath) ?: 0) - $left['dataOffset']);
+            $rightActual = max(0, (filesize($rightPath) ?: 0) - $right['dataOffset']);
+            $leftBytes = $left['dataSize'] > 0
+                ? min($left['dataSize'], $leftActual)
+                : $leftActual;
+            $rightBytes = $right['dataSize'] > 0
+                ? min($right['dataSize'], $rightActual)
+                : $rightActual;
+
             // Sample-Count = min(beide), damit kein Mismatch am Ende.
-            $sampleCountL = intdiv($left['dataSize'], $bytesPerSample);
-            $sampleCountR = intdiv($right['dataSize'], $bytesPerSample);
+            $sampleCountL = intdiv($leftBytes, $bytesPerSample);
+            $sampleCountR = intdiv($rightBytes, $bytesPerSample);
             $sampleCount = min($sampleCountL, $sampleCountR);
+
+            if ($sampleCount <= 0) {
+                throw new RuntimeException(
+                    'WAV-Merge: keine Audio-Samples in den Quelldateien '
+                    . "(left bytes={$leftBytes}, right bytes={$rightBytes})."
+                );
+            }
+
             $dataSize = $sampleCount * $outChannels * $bytesPerSample;
 
             // RIFF Header (44 Byte) für PCM Stereo.
