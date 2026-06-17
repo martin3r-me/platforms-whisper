@@ -115,12 +115,43 @@
             {{-- Dateien / Anhänge --}}
             @php
                 $files = $recording->getFileReferencesArray();
+                $audioFiles = array_values(array_filter($files, function ($f) {
+                    $kind = $f['meta']['kind'] ?? null;
+                    if ($kind === 'audio_original') {
+                        return true;
+                    }
+                    // Fallback: nach Datei-Endung im URL
+                    $url = (string) ($f['url'] ?? '');
+                    return (bool) preg_match('/\.(wav|mp3|m4a|webm|ogg|flac)(\?|$)/i', $url);
+                }));
+                $otherFiles = array_values(array_filter($files, fn($f) => !in_array($f, $audioFiles, true)));
             @endphp
-            @if(count($files) > 0)
+
+            {{-- Audio-Player für Aufnahme-Originale --}}
+            @if(count($audioFiles) > 0)
+                <x-ui-panel title="Audio">
+                    <div class="p-4 space-y-3">
+                        @foreach($audioFiles as $audio)
+                            <div class="space-y-2">
+                                <audio controls preload="metadata" class="w-full">
+                                    <source src="{{ $audio['url'] }}">
+                                    Dein Browser kann dieses Audio nicht abspielen.
+                                </audio>
+                                <div class="flex items-center justify-between text-xs text-[var(--ui-muted)]">
+                                    <span class="truncate">{{ $audio['title'] ?: 'Aufnahme' }}</span>
+                                    <a href="{{ $audio['url'] }}" download class="hover:text-[var(--ui-fg)] transition">Download</a>
+                                </div>
+                            </div>
+                        @endforeach
+                    </div>
+                </x-ui-panel>
+            @endif
+
+            @if(count($otherFiles) > 0)
                 <x-ui-panel title="Anhänge">
                     <div class="p-4">
                         <div class="space-y-2">
-                            @foreach($files as $file)
+                            @foreach($otherFiles as $file)
                                 <a href="{{ $file['url'] ?? '#' }}"
                                    target="_blank"
                                    class="flex items-center gap-3 p-3 rounded-lg border border-[var(--ui-border)] hover:bg-[var(--ui-muted-5)] transition text-sm">
