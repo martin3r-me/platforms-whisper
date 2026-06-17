@@ -161,12 +161,15 @@ class WhisperUploadController extends Controller
                 true, // multichannel
             );
 
+            // 202 Accepted: Recording-Row existiert, aber Transkription läuft
+            // erst async im Queue-Worker. Erst nach completed-Status sind
+            // transcript/segments verfuegbar (siehe GET-Endpoint / Show-Page).
             return response()->json([
                 'id' => $recording->id,
                 'uuid' => $recording->uuid,
                 'status' => $recording->status,
                 'redirect' => route('whisper.recordings.show', ['recording' => $recording->id]),
-            ]);
+            ], 202);
         } catch (Throwable $e) {
             @unlink($micTmp);
             @unlink($loopTmp);
