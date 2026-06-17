@@ -25,10 +25,15 @@ class AssemblyAiTranscriptionService
     private string $baseUrl = 'https://api.assemblyai.com/v2';
 
     /**
-     * @param  string   $filePath   Absoluter Pfad zur Audio-Datei
-     * @param  string   $filename   Nur fuer Logging / Fallback
-     * @param  ?string  $language   Sprach-Code (ISO), null = auto-detect
-     * @param  bool     $diarize    Speaker Diarization aktivieren
+     * @param  string   $filePath     Absoluter Pfad zur Audio-Datei
+     * @param  string   $filename     Nur fuer Logging / Fallback
+     * @param  ?string  $language     Sprach-Code (ISO), null = auto-detect
+     * @param  bool     $diarize      Speaker Diarization aktivieren
+     * @param  bool     $multichannel Dual-Channel-Mode (L=Spur A, R=Spur B).
+     *                                Wenn true, deaktiviert AssemblyAI die
+     *                                Diarization und nutzt die Kanäle als
+     *                                Speaker. Hier verwendet vom Dual-Upload
+     *                                (mic / loopback → Stereo-WAV).
      * @return array{
      *     transcript: string,
      *     language: ?string,
@@ -43,7 +48,8 @@ class AssemblyAiTranscriptionService
         string $filePath,
         string $filename = 'audio.webm',
         ?string $language = 'de',
-        bool $diarize = true
+        bool $diarize = true,
+        bool $multichannel = false
     ): array {
         if (!is_file($filePath)) {
             throw new RuntimeException("Audio-Datei nicht gefunden: {$filePath}");
@@ -68,10 +74,16 @@ class AssemblyAiTranscriptionService
         $payload = [
             'audio_url' => $uploadUrl,
             'speech_models' => $speechModels,
-            'speaker_labels' => $diarize,
+            // multichannel und speaker_labels schliessen sich aus —
+            // bei Dual-Channel kommt der Speaker aus dem Kanal.
+            'speaker_labels' => $multichannel ? false : $diarize,
             'punctuate' => true,
             'format_text' => true,
         ];
+
+        if ($multichannel) {
+            $payload['multichannel'] = true;
+        }
 
         if ($language && $language !== 'auto') {
             $payload['language_code'] = $language;
@@ -80,7 +92,7 @@ class AssemblyAiTranscriptionService
         }
 
         $expectedSpeakers = (int) config('whisper.assemblyai.speakers_expected', 0);
-        if ($diarize && $expectedSpeakers > 0) {
+        if ($diarize && !$multichannel && $expectedSpeakers > 0) {
             $payload['speakers_expected'] = $expectedSpeakers;
         }
 
@@ -193,11 +205,20 @@ class AssemblyAiTranscriptionService
         $segments = [];
         $speakerMap = [];
 
-        // Utterances existieren nur bei speaker_labels=true
+        // Utterances existieren bei speaker_labels=true ODER multichannel=true.
+        // In multichannel-Mode liefert AssemblyAI pro Utterance einen
+        // `channel` (1-basiert). Wir mappen Kanal → Speaker-Label:
+        //   channel 1 → "A" (mic / lokaler Nutzer)
+        //   channel 2 → "B" (loopback / Gegenseite)
         $utterances = $data['utterances'] ?? null;
         if (is_array($utterances)) {
             foreach ($utterances as $u) {
-                $speakerRaw = (string) ($u['speaker'] ?? 'A');
+                if (isset($u['channel'])) {
+                    $channel = (int) $u['channel'];
+                    $speakerRaw = $channel === 2 ? 'B' : 'A';
+                } else {
+                    $speakerRaw = (string) ($u['speaker'] ?? 'A');
+                }
                 if (!isset($speakerMap[$speakerRaw])) {
                     $speakerMap[$speakerRaw] = $speakerRaw;
                 }

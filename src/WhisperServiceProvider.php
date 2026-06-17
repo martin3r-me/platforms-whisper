@@ -46,6 +46,12 @@ class WhisperServiceProvider extends ServiceProvider
             ModuleRouter::group('whisper', function () {
                 $this->loadRoutesFrom(__DIR__.'/../routes/web.php');
             });
+
+            // Bearer-Auth API: /api/whisper/...
+            // Wird vom Dual-Channel-Upload (mic + loopback) genutzt.
+            ModuleRouter::apiGroup('whisper', function () {
+                $this->loadRoutesFrom(__DIR__.'/../routes/api.php');
+            });
         }
 
         $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');

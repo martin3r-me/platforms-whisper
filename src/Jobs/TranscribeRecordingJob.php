@@ -27,7 +27,8 @@ class TranscribeRecordingJob implements ShouldQueue
     public function __construct(
         public int $recordingId,
         public string $audioPath,
-        public string $language = 'de'
+        public string $language = 'de',
+        public bool $multichannel = false,
     ) {
     }
 
@@ -48,7 +49,8 @@ class TranscribeRecordingJob implements ShouldQueue
                 $this->audioPath,
                 basename($this->audioPath),
                 $this->language === 'auto' ? null : $this->language,
-                (bool) config('whisper.assemblyai.speaker_labels', true)
+                (bool) config('whisper.assemblyai.speaker_labels', true),
+                $this->multichannel,
             );
 
             $finalTranscript = (string) ($result['transcript'] ?? '');
