@@ -48,14 +48,6 @@ class ImportRecordingTool implements ToolContract, ToolMetadataContract
                     'type' => 'string',
                     'description' => 'Titel der Aufnahme (ERFORDERLICH).',
                 ],
-                'summary' => [
-                    'type' => 'string',
-                    'description' => 'Optional: Zusammenfassung (Markdown).',
-                ],
-                'action_items' => [
-                    'type' => 'string',
-                    'description' => 'Optional: Action Items (Markdown).',
-                ],
                 'duration_seconds' => [
                     'type' => 'integer',
                     'description' => 'Optional: Dauer in Sekunden.',
@@ -71,14 +63,6 @@ class ImportRecordingTool implements ToolContract, ToolMetadataContract
                 'recorded_at' => [
                     'type' => 'string',
                     'description' => 'Optional: Zeitpunkt der Aufnahme (ISO 8601).',
-                ],
-                'outline' => [
-                    'type' => 'array',
-                    'description' => 'Optional: Gliederung/Outline (Array von Strings oder Objekten).',
-                ],
-                'ai_suggestions' => [
-                    'type' => 'string',
-                    'description' => 'Optional: KI-generierte Vorschläge/Empfehlungen.',
                 ],
                 'device_serial' => [
                     'type' => 'string',
@@ -148,10 +132,6 @@ class ImportRecordingTool implements ToolContract, ToolMetadataContract
                 'team_id' => $teamId,
                 'created_by_user_id' => $context->user?->id,
                 'title' => $title,
-                'summary' => isset($arguments['summary']) ? trim($arguments['summary']) : null,
-                'action_items' => isset($arguments['action_items']) ? trim($arguments['action_items']) : null,
-                'outline' => $arguments['outline'] ?? null,
-                'ai_suggestions' => isset($arguments['ai_suggestions']) ? trim($arguments['ai_suggestions']) : null,
                 'speaker_map' => $speakerMap,
                 'language' => $arguments['language'] ?? 'de',
                 'duration_seconds' => isset($arguments['duration_seconds']) ? (int) $arguments['duration_seconds'] : null,

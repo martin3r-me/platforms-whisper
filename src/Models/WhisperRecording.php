@@ -27,10 +27,6 @@ class WhisperRecording extends Model
         'created_by_user_id',
         'title',
         'transcript',
-        'summary',
-        'action_items',
-        'outline',
-        'ai_suggestions',
         'segments',
         'speakers_count',
         'speaker_map',
@@ -52,7 +48,6 @@ class WhisperRecording extends Model
         'speakers_count' => 'integer',
         'segments' => 'array',
         'speaker_map' => 'array',
-        'outline' => 'array',
         'recorded_at' => 'datetime',
     ];
 
@@ -76,11 +71,6 @@ class WhisperRecording extends Model
     public function createdByUser(): BelongsTo
     {
         return $this->belongsTo(\Platform\Core\Models\User::class, 'created_by_user_id');
-    }
-
-    public function questions(): HasMany
-    {
-        return $this->hasMany(WhisperQuestion::class, 'whisper_recording_id');
     }
 
     public function segmentRows(): HasMany

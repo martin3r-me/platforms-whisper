@@ -1,15 +1,18 @@
 # Platform Whisper Module
 
-Audio-Aufnahme im Browser → **AssemblyAI** Transkription mit Speaker Diarization → LLM-Zusammenfassung.
-Audio-Datei wird **nicht** dauerhaft gespeichert, nur Transkript + Segmente + Summary bleiben persistent.
+Audio-Aufnahme → **AssemblyAI** Transkription mit Speaker Diarization (oder Dual-Channel Multichannel) → Transkript + Segmente + Sprecher landen persistent.
+
+**Scope:** Whisper liefert Transkripte und Sprecher-Segmente. Höhere Layer (Zusammenfassungen, Action Items, Q&A, semantischer Titel) leben im **Inbox-Modul** als Enrichment-Pipeline. Whisper feuert nach `status=completed` einen Observer, der das Recording in den Inbox-Triage-Layer übergibt.
 
 ## Features
 
 - Browser-Recorder via MediaRecorder API (Opus, mono)
-- **Speaker Diarization**: AssemblyAI markiert Sprecher (A, B, C, …) pro Äußerung
-- **LLM-Summary**: automatischer Titel + Bullet-Point-Zusammenfassung via OpenAI
+- Dual-Channel-Upload (`POST /api/whisper/recordings/dual`, Bearer-Auth): zwei WAV-Spuren (`mic` + `loopback`) werden serverseitig zu Stereo gemerged und an AssemblyAI im Multichannel-Mode geschickt
+- **Speaker Diarization** bei Mono / **Multichannel** bei Dual-Spur (Kanal-Identifier statt VAD-Ratespiel)
 - **Queue-basiert**: Upload kehrt sofort zurück, Job verarbeitet im Hintergrund
-- **Organization-Linking**: `HasOrganizationContexts` (morph_alias `whisper_recording`), nutzbar über die Core-LLM-Tools
+- **Audio-Persistence**: Original-File wandert via `ContextFileService` auf S3, Recording behält File-Reference (`kind: audio_original`)
+- **Inbox-Bridge**: Fertige Recordings werden automatisch als `InboxItem` mit Channel `recording` in die Inbox ingested
+- **Organization-Linking**: `HasOrganizationContexts` (morph_alias `whisper_recording`)
 
 ## Voraussetzungen (Host-App)
 
@@ -37,9 +40,6 @@ php artisan migrate
 ```env
 # Transkription + Diarization
 ASSEMBLYAI_API_KEY=...
-
-# LLM-Summary (wiederverwendet OpenAiService der Platform)
-OPENAI_API_KEY=sk-...
 ```
 
 ### 3. Queue Worker
@@ -68,31 +68,32 @@ Tabelle `whisper_recordings` (Kern-Felder):
 |---|---|---|
 | id / uuid | PK | UuidV7 |
 | team_id / created_by_user_id | FK | Team-Scope |
-| title | string | LLM-generiert (Fallback: erster Satz) |
+| title | string | "Aufnahme vom dd.mm.yyyy HH:ii" (semantischer Titel kommt aus Inbox-Enrichment) |
 | transcript | longText | Fließtext-Transkript |
-| summary | longText | LLM-Bullet-Points |
 | segments | json | `[{speaker, start, end, text}, …]` |
 | speakers_count | int | Anzahl erkannter Sprecher |
+| speaker_map | json | Optional: A/B/C → Anzeigename |
 | language | string | ISO-Code, AssemblyAI-detected |
 | duration_seconds | int | |
-| model | string | z. B. `assemblyai:universal` |
+| model | string | z. B. `assemblyai:universal-3-pro` |
 | provider_id | string | AssemblyAI transcript id |
 | status | enum | pending / processing / completed / failed |
 | error_message | text | bei failed |
 
 ## Workflow
 
-1. User klickt **Aufnehmen** auf `/whisper`
-2. Browser nimmt Mic auf (Opus, mono)
-3. Stop → Blob wird per `fetch()` an `/whisper/upload` POSTet
-4. Controller speichert Blob in `storage/app/whisper-tmp/{uuid}.webm`, legt Recording mit `status=pending` an, dispatched `TranscribeRecordingJob`, redirected User zur Show-Page
-5. Job (Worker):
+1. Upload-Quelle:
+   - Browser-Recorder auf `/whisper` → `POST /whisper/upload` (Session-Auth, mono Opus/WebM)
+   - Dual-Channel Client → `POST /api/whisper/recordings/dual` (Bearer-Auth, zwei WAVs `mic` + `loopback`, serverseitig zu Stereo gemerged)
+2. Controller speichert Audio in `storage/app/whisper-tmp/`, legt Recording mit `status=pending` an, dispatched `TranscribeRecordingJob`
+3. Job (Worker):
    - Status → `processing`
-   - `AssemblyAiTranscriptionService::transcribe()`: Upload → Submit (mit `speaker_labels=true`) → Polling bis `completed`
-   - `WhisperSummaryService::summarize()`: LLM erzeugt Titel + Summary
-   - Recording bekommt `transcript`, `segments`, `speakers_count`, `summary`, `title`, Status → `completed`
-   - Tmp-Datei wird gelöscht (`finally`-Block)
-6. Show-Page pollt alle 3 s während `pending`/`processing`, zeigt danach Sprecher-Blöcke + Summary + Fließtext
+   - `AssemblyAiTranscriptionService::transcribe()`: Upload → Submit → Polling bis `completed` (Mono: `speaker_labels`; Dual: `multichannel`)
+   - Recording bekommt `transcript`, `segments`, `speakers_count`, `language`, `duration_seconds`, `provider_id`
+   - Original-Audio wird via `ContextFileService` persistiert (File-Reference `kind: audio_original`)
+   - Status → `completed` → Tmp-Datei wird gelöscht
+4. `WhisperRecordingInboxObserver` feuert auf den completed-Übergang und dispatched `IngestRecordingToInboxJob` → Recording wandert als `InboxItem` in den Inbox-Triage-Layer
+5. Show-Page pollt alle 3 s während `pending`/`processing`, zeigt Sprecher-Blöcke + Fließtext + Inline-Audio-Player
 
 ## Fehler-Handling
 
@@ -109,7 +110,7 @@ Tabelle `whisper_recordings` (Kern-Felder):
 - `whisper.recordings.PUT` — Metadaten updaten
 - `whisper.recordings.DELETE` — Aufnahme löschen
 - `whisper.recordings.search.GET` — Volltextsuche
-- `whisper.recording.transcript.GET` — Nur Transkript + Summary + Segments (LLM-freundlich)
+- `whisper.recording.transcript.GET` — Reines Transkript + Segments (LLM-freundlich)
 
 ## Config Overrides
 
@@ -125,4 +126,5 @@ WHISPER_AAI_SPEAKERS_EXPECTED=0     # 0 = automatisch, sonst erwartete Anzahl
 
 - Editierbares Transkript
 - Echtzeit-Streaming
-- Speaker-Identifikation (Zuordnung zu Personen/Namen) — liefert nur `A`, `B`, `C` …
+- Speaker-Identifikation (Zuordnung zu Personen/Namen) — liefert nur `A`, `B`, `C` … plus optionalen `speaker_map`-Override
+- Zusammenfassung / Action Items / Q&A — lebt im Inbox-Modul als Enrichment-Pipeline

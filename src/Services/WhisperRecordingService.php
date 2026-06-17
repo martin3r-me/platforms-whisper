@@ -8,7 +8,7 @@ class WhisperRecordingService
 {
     public function update(WhisperRecording $recording, array $payload): WhisperRecording
     {
-        $allowed = ['title', 'transcript', 'language', 'summary', 'action_items', 'duration_seconds', 'outline', 'ai_suggestions', 'device_serial', 'recorded_at', 'source_url'];
+        $allowed = ['title', 'transcript', 'language', 'duration_seconds', 'device_serial', 'recorded_at', 'source_url'];
         $update = array_intersect_key($payload, array_flip($allowed));
         if (!empty($update)) {
             $recording->update($update);

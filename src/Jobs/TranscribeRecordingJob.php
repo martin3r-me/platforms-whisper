@@ -10,7 +10,6 @@ use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Platform\Whisper\Models\WhisperRecording;
-use Platform\Whisper\Services\AssemblyAiLemurService;
 use Platform\Whisper\Services\AssemblyAiTranscriptionService;
 use Throwable;
 
@@ -34,7 +33,6 @@ class TranscribeRecordingJob implements ShouldQueue
 
     public function handle(
         AssemblyAiTranscriptionService $transcription,
-        AssemblyAiLemurService $lemur
     ): void {
         $recording = WhisperRecording::find($this->recordingId);
         if (!$recording) {
@@ -73,31 +71,9 @@ class TranscribeRecordingJob implements ShouldQueue
                 $update['duration_seconds'] = (int) round((float) $duration);
             }
 
-            // LeMUR: Titel + Summary + Action Items in einem Task-Call.
-            $providerId = (string) ($result['provider_id'] ?? '');
-            $insights = $providerId !== ''
-                ? $lemur->generateInsights($providerId, $detectedLang ?? $this->language)
-                : ['title' => null, 'summary' => null, 'action_items' => null];
-
-            $hasDefaultTitle = !$recording->title || str_starts_with((string) $recording->title, 'Aufnahme vom ');
-
-            if ($hasDefaultTitle) {
-                if (!empty($insights['title'])) {
-                    $update['title'] = $insights['title'];
-                } else {
-                    $fallback = $this->generateTitle($finalTranscript);
-                    if ($fallback) {
-                        $update['title'] = $fallback;
-                    }
-                }
-            }
-
-            if (!empty($insights['summary'])) {
-                $update['summary'] = $insights['summary'];
-            }
-            if (!empty($insights['action_items'])) {
-                $update['action_items'] = $insights['action_items'];
-            }
+            // Higher-level layers (summary, action items, semantic title) live
+            // in the Inbox module's enrichment pipeline now — Whisper's scope
+            // is transcript + speakers + segments only.
 
             // Persist the original audio FIRST, then set status=completed.
             // The inbox observer fires on the completed transition and
@@ -226,26 +202,4 @@ class TranscribeRecordingJob implements ShouldQueue
         }
     }
 
-    /**
-     * Fallback-Titel aus dem Transkript: erster Satz, max. 80 Zeichen.
-     */
-    private function generateTitle(string $transcript): ?string
-    {
-        $clean = trim(preg_replace('/\s+/u', ' ', $transcript));
-        if ($clean === '') {
-            return null;
-        }
-
-        if (preg_match('/^(.*?[\.\!\?])(\s|$)/u', $clean, $m)) {
-            $sentence = trim($m[1]);
-        } else {
-            $sentence = $clean;
-        }
-
-        if (mb_strlen($sentence) > 80) {
-            $sentence = mb_substr($sentence, 0, 77) . '…';
-        }
-
-        return $sentence ?: null;
-    }
 }

@@ -74,8 +74,6 @@ class GetTranscriptTool implements ToolContract, ToolMetadataContract
                 'duration_seconds' => $rec->duration_seconds,
                 'transcript' => $rec->transcript,
                 'transcript_length' => mb_strlen((string) $rec->transcript),
-                'summary' => $rec->summary,
-                'action_items' => $rec->action_items,
                 'segments' => $rec->segments,
                 'speakers_count' => $rec->speakers_count,
             ]);

@@ -99,7 +99,8 @@ class WhisperServiceProvider extends ServiceProvider
             // PlaudSyncTool wandered into the Inbox module as
             // inbox.plaud.sync.POST — Plaud is a vendor adapter, not part
             // of Whisper's audio-pipeline concern.
-            $registry->register(resolve(\Platform\Whisper\Tools\AskRecordingQuestionTool::class));
+            // Q&A (AskRecordingQuestionTool) moved to the Inbox enrichment
+            // pipeline along with summaries and action items.
         } catch (\Throwable $e) {
             \Log::warning('Whisper: Tool-Registrierung fehlgeschlagen', ['error' => $e->getMessage()]);
         }

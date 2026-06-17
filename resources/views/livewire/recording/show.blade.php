@@ -69,49 +69,6 @@
                 </x-ui-panel>
             @endif
 
-            {{-- Summary (falls vorhanden) --}}
-            @if($recording->summary)
-                <x-ui-panel title="Zusammenfassung">
-                    <div class="p-4">
-                        <div class="whitespace-pre-wrap text-sm leading-relaxed text-[var(--ui-fg)]">{{ $recording->summary }}</div>
-                    </div>
-                </x-ui-panel>
-            @endif
-
-            {{-- Action Items (falls vorhanden) --}}
-            @if($recording->action_items)
-                <x-ui-panel title="Action Items">
-                    <div class="p-4">
-                        <div class="whitespace-pre-wrap text-sm leading-relaxed text-[var(--ui-fg)]">{{ $recording->action_items }}</div>
-                    </div>
-                </x-ui-panel>
-            @endif
-
-            {{-- Outline (falls vorhanden) --}}
-            @if($recording->outline && is_array($recording->outline) && count($recording->outline) > 0)
-                <x-ui-panel title="Gliederung">
-                    <div class="p-4">
-                        <ul class="space-y-1 text-sm leading-relaxed text-[var(--ui-fg)]">
-                            @foreach($recording->outline as $item)
-                                <li class="flex gap-2">
-                                    <span class="text-[var(--ui-muted)] flex-shrink-0">{{ $loop->iteration }}.</span>
-                                    <span>{{ is_array($item) ? ($item['title'] ?? ($item['text'] ?? json_encode($item))) : $item }}</span>
-                                </li>
-                            @endforeach
-                        </ul>
-                    </div>
-                </x-ui-panel>
-            @endif
-
-            {{-- AI Suggestions (falls vorhanden) --}}
-            @if($recording->ai_suggestions)
-                <x-ui-panel title="KI-Empfehlungen">
-                    <div class="p-4">
-                        <div class="whitespace-pre-wrap text-sm leading-relaxed text-[var(--ui-fg)]">{{ $recording->ai_suggestions }}</div>
-                    </div>
-                </x-ui-panel>
-            @endif
-
             {{-- Dateien / Anhänge --}}
             @php
                 $files = $recording->getFileReferencesArray();
@@ -172,66 +129,6 @@
                                     </svg>
                                 </a>
                             @endforeach
-                        </div>
-                    </div>
-                </x-ui-panel>
-            @endif
-
-            {{-- Q&A Chat --}}
-            @if($recording->status === 'completed' && $recording->provider_id)
-                <x-ui-panel title="Fragen an das Transkript">
-                    <div class="p-4 space-y-4">
-                        {{-- Bisherige Fragen --}}
-                        @if($questions->isNotEmpty())
-                            <div class="space-y-3 max-h-96 overflow-y-auto">
-                                @foreach($questions as $q)
-                                    <div class="space-y-1.5">
-                                        {{-- Frage --}}
-                                        <div class="d-flex gap-2">
-                                            <div class="flex-grow-1 p-3 rounded-lg bg-[var(--ui-primary-5,theme(colors.blue.50))] border border-[var(--ui-primary-10,theme(colors.blue.100))]">
-                                                <div class="text-xs text-[var(--ui-muted)] mb-1">Du · {{ $q->created_at->format('d.m. H:i') }}</div>
-                                                <div class="text-sm font-medium text-[var(--ui-fg)]">{{ $q->question }}</div>
-                                            </div>
-                                            <button type="button"
-                                                    wire:click="deleteQuestion({{ $q->id }})"
-                                                    wire:confirm="Frage löschen?"
-                                                    class="flex-shrink-0 self-start p-1 text-[var(--ui-muted)] hover:text-red-500 transition"
-                                                    title="Löschen">
-                                                <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-                                            </button>
-                                        </div>
-                                        {{-- Antwort --}}
-                                        <div class="ml-4 p-3 rounded-lg {{ $q->status === 'failed' ? 'bg-red-50 border border-red-200' : 'bg-[var(--ui-muted-5)] border border-[var(--ui-border)]' }}">
-                                            <div class="text-xs text-[var(--ui-muted)] mb-1">LeMUR (Claude)</div>
-                                            <div class="text-sm leading-relaxed text-[var(--ui-fg)] whitespace-pre-wrap">{{ $q->answer }}</div>
-                                        </div>
-                                    </div>
-                                @endforeach
-                            </div>
-                        @endif
-
-                        {{-- Input --}}
-                        <form wire:submit="askQuestion" class="d-flex gap-2">
-                            <input type="text"
-                                   wire:model="questionInput"
-                                   placeholder="Frage an das Transkript stellen…"
-                                   maxlength="500"
-                                   class="flex-grow-1 px-3 py-2 text-sm border border-[var(--ui-border)] rounded-lg bg-transparent text-[var(--ui-fg)] placeholder:text-[var(--ui-muted)] focus:outline-none focus:ring-2 focus:ring-[var(--ui-primary)] focus:border-transparent"
-                                   @if($askingQuestion) disabled @endif>
-                            <x-ui-button type="submit" variant="primary" size="sm" :disabled="$askingQuestion">
-                                @if($askingQuestion)
-                                    <svg class="animate-spin h-4 w-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path>
-                                    </svg>
-                                @else
-                                    Fragen
-                                @endif
-                            </x-ui-button>
-                        </form>
-
-                        <div class="text-xs text-[var(--ui-muted)]">
-                            Antworten basieren ausschließlich auf dem Transkript-Inhalt (LeMUR / Claude).
                         </div>
                     </div>
                 </x-ui-panel>

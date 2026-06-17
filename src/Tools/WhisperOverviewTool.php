@@ -39,10 +39,9 @@ class WhisperOverviewTool implements ToolContract, ToolMetadataContract
                 ],
                 'data_model' => [
                     'whisper_recordings' => [
-                        'description' => 'Aufnahme mit Transkript, Summary, Action Items, Outline, AI Suggestions. Kann via Browser-Recorder (AssemblyAI) oder Import (Plaud, extern) erstellt werden.',
+                        'description' => 'Aufnahme mit Transkript und Sprecher-Segmenten. Kann via Browser-Recorder (AssemblyAI) oder externen Import erstellt werden. Hoehere Layer (Summary, Action Items, Q&A) liegen im Inbox-Modul.',
                         'key_fields' => [
                             'id', 'uuid', 'team_id', 'title', 'transcript',
-                            'summary', 'action_items', 'outline', 'ai_suggestions',
                             'segments (JSON legacy)', 'speakers_count', 'speaker_map',
                             'language', 'duration_seconds', 'recorded_at',
                             'model', 'provider_id', 'device_serial', 'source_url',
@@ -51,7 +50,7 @@ class WhisperOverviewTool implements ToolContract, ToolMetadataContract
                         'status_funnel' => [
                             'pending' => 'Erstellt, wartet auf Verarbeitung.',
                             'processing' => 'Import/Transkription laeuft, Segmente werden angehaengt.',
-                            'completed' => 'Fertig: Transkript, Segmente, Summary vorhanden.',
+                            'completed' => 'Fertig: Transkript und Segmente vorhanden.',
                             'failed' => 'Fehler. error_message enthaelt Details.',
                         ],
                     ],
@@ -74,22 +73,12 @@ class WhisperOverviewTool implements ToolContract, ToolMetadataContract
                     ],
                 ],
                 'import_workflows' => [
-                    'plaud_single_call' => [
-                        'tool' => 'whisper.plaud.sync.POST',
-                        'description' => 'EMPFOHLEN fuer Plaud-Import. Ein einziger Call importiert alles atomar: Metadaten, Note (wird automatisch in Summary/Action Items/Outline/AI Suggestions geparst), Transcript-Segmente, Speaker-Resolution. Duplikat-Erkennung via file_id.',
-                        'auto_parsed_from_note_content' => [
-                            'summary' => 'Aus Markdown-Section "## Zusammenfassung"',
-                            'action_items' => 'Aus Markdown-Section "## Nächste Vereinbarungen"',
-                            'ai_suggestions' => 'Aus Markdown-Section "## KI-Vorschläge"',
-                            'outline' => 'Aus Markdown-Section "## Besprechungsinformationen" (Key-Value Paare)',
-                        ],
-                    ],
                     'multi_step_import' => [
                         'step_1' => 'whisper.recordings.import.POST - Recording anlegen mit Metadaten',
                         'step_2' => 'whisper.recordings.segments.APPEND - Segmente in Batches (max ~50) anhaengen',
                         'step_3' => 'APPEND mit is_last_batch=true - Finalisiert Recording (baut Transcript, zaehlt Speaker)',
-                        'note' => 'Nur noetig wenn note_content nicht als Markdown vorliegt oder Segmente einzeln verarbeitet werden muessen.',
                     ],
+                    'plaud' => 'Plaud-Import lebt jetzt im Inbox-Modul (inbox.plaud.sync.POST). Plaud-Items landen direkt im Inbox; Whisper bekommt keine Plaud-Recordings mehr.',
                 ],
                 'entity_linking' => [
                     'description' => 'Recordings koennen mit Organization-Entities (Projekt, Kunde, etc.) verknuepft werden.',
