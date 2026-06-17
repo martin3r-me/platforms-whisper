@@ -30,6 +30,8 @@ class IngestRecordingToInboxJob implements ShouldQueue
             return;
         }
 
+        $audioRef = $this->resolveAudioReference($recording);
+
         // Build the contract payload that Inbox expects.
         $payload = [
             'team_id' => $recording->team_id,
@@ -47,17 +49,53 @@ class IngestRecordingToInboxJob implements ShouldQueue
             // upload via ContextFileService before discarding the tmp file.
             // We hand the resulting context_file_id over to Inbox, which adds
             // its own reference (kind=audio_original) on the inbox_item.
-            'audio_file' => $this->resolveAudioReference($recording),
+            'audio_file' => $audioRef,
         ];
 
         try {
-            app($serviceClass)->ingest($payload);
+            $item = app($serviceClass)->ingest($payload);
         } catch (\Throwable $e) {
-            \Log::warning('Whisper→Inbox: ingest failed', [
-                'recording_id' => $recording->id,
-                'error' => $e->getMessage(),
-            ]);
+            $this->recordWarning($recording, 'ingest failed: ' . $e->getMessage());
+            return;
         }
+
+        if (!$item) {
+            $this->recordWarning($recording, 'ingest returned null — payload likely missing a required field.');
+            return;
+        }
+
+        // Verify the audio actually attached on the Inbox side. attachAudioFile
+        // inside InboxAudioIngestionService logs-only on failure, which would
+        // leave the Inbox item with no playback and us none the wiser.
+        if ($audioRef !== null) {
+            $attached = $item->getOrderedFileReferences()
+                ->contains(fn ($r) => ($r->meta['kind'] ?? null) === 'audio_original');
+            if (!$attached) {
+                $this->recordWarning(
+                    $recording,
+                    'InboxItem #' . $item->id . ' wurde angelegt, aber das Audio-File ist nicht angehaengt.'
+                );
+            }
+        }
+    }
+
+    /**
+     * Surfaces an Inbox-bridge problem on the Whisper recording so the show
+     * page can flag it. Status stays untouched — the transcript itself is
+     * fine; only the downstream bridge had trouble.
+     */
+    private function recordWarning(WhisperRecording $recording, string $message): void
+    {
+        \Log::warning('Whisper→Inbox: ' . $message, [
+            'recording_id' => $recording->id,
+        ]);
+
+        $line = 'Inbox-Bridge: ' . trim($message);
+        $existing = (string) ($recording->error_message ?? '');
+        $combined = $existing === '' ? $line : ($existing . "\n" . $line);
+        $recording->update([
+            'error_message' => mb_substr($combined, 0, 1000),
+        ]);
     }
 
     /**

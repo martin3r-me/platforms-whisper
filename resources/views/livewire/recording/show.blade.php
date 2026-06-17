@@ -69,6 +69,16 @@
                 </x-ui-panel>
             @endif
 
+            {{-- Warnungen (Status=completed, aber Nebenpfade haben gemault) --}}
+            @if($recording->status === 'completed' && $recording->error_message)
+                <x-ui-panel title="Hinweise">
+                    <div class="p-4 rounded-lg border border-amber-300 bg-amber-50 text-amber-900 text-sm leading-relaxed">
+                        <div class="font-medium mb-1">Transkript ist verfügbar, aber Nebenpfade hatten Probleme:</div>
+                        <pre class="whitespace-pre-wrap font-mono text-xs">{{ $recording->error_message }}</pre>
+                    </div>
+                </x-ui-panel>
+            @endif
+
             {{-- Dateien / Anhänge --}}
             @php
                 $files = $recording->getFileReferencesArray();

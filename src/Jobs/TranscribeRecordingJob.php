@@ -153,15 +153,21 @@ class TranscribeRecordingJob implements ShouldQueue
     /**
      * Persist the original audio file via ContextFileService — keeps it on the
      * platform's default storage disk (S3 in production), under a stable folder
-     * convention. Soft-coupled: if ContextFileService is missing or the file is
-     * already gone, just log and move on (transcript stays usable).
+     * convention.
+     *
+     * On failure the transcript itself is still valid, so the recording stays
+     * status=completed — but we set error_message so the show page can flag
+     * the audio gap. Silent log-only fallbacks bit us in production: every
+     * dual-channel test recording landed with files:[] and no clue why.
      */
     private function persistAudio(WhisperRecording $recording): void
     {
         if (!is_file($this->audioPath)) {
+            $this->recordPersistAudioWarning($recording, 'Audio-File auf Disk nicht gefunden, bevor Persist startete.');
             return;
         }
         if (!class_exists(\Platform\Core\Services\ContextFileService::class)) {
+            $this->recordPersistAudioWarning($recording, 'Platform\\Core\\Services\\ContextFileService nicht geladen.');
             return;
         }
 
@@ -188,18 +194,40 @@ class TranscribeRecordingJob implements ShouldQueue
                 ],
             );
 
-            if (!empty($result['context_file_id'])) {
-                $recording->addFileReference(
-                    (int) $result['context_file_id'],
-                    ['kind' => 'audio_original', 'persisted_by' => 'TranscribeRecordingJob'],
+            if (empty($result['context_file_id'])) {
+                $this->recordPersistAudioWarning(
+                    $recording,
+                    'ContextFileService::uploadForContext lieferte keine context_file_id zurueck.'
                 );
+                return;
             }
+
+            $recording->addFileReference(
+                (int) $result['context_file_id'],
+                ['kind' => 'audio_original', 'persisted_by' => 'TranscribeRecordingJob'],
+            );
         } catch (Throwable $e) {
-            Log::warning('Whisper: audio persistence failed', [
-                'recording_id' => $recording->id,
-                'error' => $e->getMessage(),
-            ]);
+            $this->recordPersistAudioWarning($recording, $e->getMessage());
         }
     }
 
+    /**
+     * Writes the audio-persist warning to the recording's error_message so it
+     * surfaces in the UI, while leaving status=completed because the transcript
+     * itself is still valid. Also logs for ops.
+     */
+    private function recordPersistAudioWarning(WhisperRecording $recording, string $message): void
+    {
+        Log::warning('Whisper: audio persistence failed', [
+            'recording_id' => $recording->id,
+            'error' => $message,
+        ]);
+
+        $line = 'Audio-Persist: ' . trim($message);
+        $existing = (string) ($recording->error_message ?? '');
+        $combined = $existing === '' ? $line : ($existing . "\n" . $line);
+        $recording->update([
+            'error_message' => mb_substr($combined, 0, 1000),
+        ]);
+    }
 }
