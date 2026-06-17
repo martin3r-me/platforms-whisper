@@ -194,16 +194,20 @@ class TranscribeRecordingJob implements ShouldQueue
                 ],
             );
 
-            if (empty($result['context_file_id'])) {
+            // ContextFileService::uploadForContext returns the file's primary
+            // key under 'id' — earlier code looked for 'context_file_id'
+            // (copy-paste from a non-existent key) and silently never
+            // attached the audio reference.
+            if (empty($result['id'])) {
                 $this->recordPersistAudioWarning(
                     $recording,
-                    'ContextFileService::uploadForContext lieferte keine context_file_id zurueck.'
+                    'ContextFileService::uploadForContext lieferte keine id zurueck.'
                 );
                 return;
             }
 
             $recording->addFileReference(
-                (int) $result['context_file_id'],
+                (int) $result['id'],
                 ['kind' => 'audio_original', 'persisted_by' => 'TranscribeRecordingJob'],
             );
         } catch (Throwable $e) {
