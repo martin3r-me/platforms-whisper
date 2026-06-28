@@ -7,6 +7,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use Platform\Whisper\Jobs\TranscribeRecordingJob;
@@ -92,6 +93,12 @@ class WhisperUploadController extends Controller
             'loopback' => 'required|file|max:512000', // 500 MB
             'recorded_at' => 'nullable|string',
             'title' => 'nullable|string|max:255',
+            // Optional: InboxItem id of a meeting this recording belongs
+            // to. The Mac client fetches this from /api/inbox/meetings/
+            // current. Server validates the item is accessible to the
+            // calling user; mismatches degrade silently to standalone
+            // (we don't want to fail an upload over a stale meeting id).
+            'meeting_inbox_item_id' => 'nullable|integer',
         ]);
 
         $user = Auth::user();
@@ -145,6 +152,11 @@ class WhisperUploadController extends Controller
 
             $sizeBytes = filesize($stereoTmp) ?: null;
 
+            $targetInboxItemId = $this->resolveTargetInboxItemId(
+                $validated['meeting_inbox_item_id'] ?? null,
+                (int) $team->id
+            );
+
             $recording = WhisperRecording::create([
                 'team_id' => $team->id,
                 'created_by_user_id' => $user->id,
@@ -152,6 +164,7 @@ class WhisperUploadController extends Controller
                 'status' => WhisperRecording::STATUS_PENDING,
                 'model' => 'assemblyai',
                 'file_size_bytes' => $sizeBytes,
+                'target_inbox_item_id' => $targetInboxItemId,
             ]);
 
             TranscribeRecordingJob::dispatch(
@@ -213,5 +226,35 @@ class WhisperUploadController extends Controller
         }
 
         return null;
+    }
+
+    /**
+     * Resolves the meeting_inbox_item_id sent by the client into a valid
+     * InboxItem id within the user's team. Returns null silently for
+     * missing / unreachable ids — we don't want a stale meeting hint to
+     * fail the recording upload. The IngestRecordingToInboxJob handles
+     * the not-found case again at handoff time as a second line of
+     * defence.
+     *
+     * Queries via raw DB to avoid taking a hard module dependency on the
+     * Inbox Eloquent model.
+     */
+    private function resolveTargetInboxItemId(?int $candidate, int $teamId): ?int
+    {
+        if (!$candidate || $candidate <= 0) {
+            return null;
+        }
+        $row = DB::table('inbox_items')
+            ->where('id', $candidate)
+            ->where('team_id', $teamId)
+            ->first(['id', 'channel']);
+        if (!$row) {
+            Log::info('Dual upload: meeting_inbox_item_id not found in team', [
+                'candidate' => $candidate,
+                'team_id' => $teamId,
+            ]);
+            return null;
+        }
+        return (int) $row->id;
     }
 }

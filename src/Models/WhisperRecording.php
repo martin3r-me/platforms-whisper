@@ -37,6 +37,7 @@ class WhisperRecording extends Model
         'provider_id',
         'device_serial',
         'source_url',
+        'target_inbox_item_id',
         'status',
         'error_message',
         'recorded_at',

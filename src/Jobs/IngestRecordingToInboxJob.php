@@ -77,6 +77,54 @@ class IngestRecordingToInboxJob implements ShouldQueue
                 );
             }
         }
+
+        // If the client supplied a meeting (or other primary) InboxItem id
+        // at upload time, ask the Inbox link contract to record a
+        // "supplements" relation. Decoupled via interface — Whisper never
+        // touches Inbox tables or models directly.
+        $this->linkSupplementsIfNeeded($recording, $item);
+    }
+
+    /**
+     * Resolves the Inbox link contract from the container and creates a
+     * Supplements link between the freshly-ingested recording InboxItem
+     * and the target meeting InboxItem the Mac client passed at upload.
+     *
+     * Soft-coupled: if the Inbox module is gone, the contract isn't
+     * bound, or the target item disappeared between upload and ingest,
+     * we log a warning to the recording and move on. The recording
+     * InboxItem still stands on its own.
+     */
+    private function linkSupplementsIfNeeded(WhisperRecording $recording, $recordingInboxItem): void
+    {
+        $targetId = (int) ($recording->target_inbox_item_id ?? 0);
+        if ($targetId <= 0) {
+            return;
+        }
+
+        $contract = '\\Platform\\Inbox\\Contracts\\InboxItemLinkContract';
+        if (!interface_exists($contract)) {
+            $this->recordWarning($recording, 'InboxItemLinkContract not loaded — no link created.');
+            return;
+        }
+
+        try {
+            app($contract)->supplements(
+                supplementaryItemId: (int) $recordingInboxItem->id,
+                primaryItemId: $targetId,
+                meta: ['source' => 'whisper.upload.dual', 'recording_id' => $recording->id],
+            );
+            \Log::info('Whisper→Inbox: linked supplements', [
+                'recording_id' => $recording->id,
+                'from' => $recordingInboxItem->id,
+                'to' => $targetId,
+            ]);
+        } catch (\Throwable $e) {
+            $this->recordWarning(
+                $recording,
+                'Link to meeting #' . $targetId . ' failed: ' . $e->getMessage()
+            );
+        }
     }
 
     /**
