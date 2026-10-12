@@ -126,11 +126,22 @@
                         },
                         async upload() {
                             const blob = new Blob(this.chunks, { type: this.mediaRecorder?.mimeType || 'audio/webm' });
+                            const ext = (this.mediaRecorder?.mimeType || '').includes('mp4') ? 'm4a' : 'webm';
+                            await this.send(blob, 'audio.' + ext);
+                        },
+                        async pickFile(event) {
+                            const file = event.target.files && event.target.files[0];
+                            event.target.value = '';
+                            if (!file) return;
+                            this.error = null;
+                            this.state = 'uploading';
+                            await this.send(file, file.name);
+                        },
+                        async send(blob, filename) {
                             const sizeMb = (blob.size / 1024 / 1024).toFixed(1);
                             this.info = 'Upload (' + sizeMb + ' MB) läuft…';
                             const fd = new FormData();
-                            const ext = (this.mediaRecorder?.mimeType || '').includes('mp4') ? 'm4a' : 'webm';
-                            fd.append('audio', blob, 'audio.' + ext);
+                            fd.append('audio', blob, filename);
                             const csrf = document.querySelector('meta[name=&quot;csrf-token&quot;]')?.getAttribute('content');
                             try {
                                 const res = await fetch(this.uploadUrl, {
@@ -186,6 +197,14 @@
                             <div class="text-base font-medium text-[var(--ui-secondary)]">Aufnahme starten</div>
                             <div class="text-xs text-[var(--ui-muted)] mt-0.5">Klicke den Button und sprich los</div>
                         </div>
+                        <label class="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-[var(--ui-border)] bg-[var(--ui-muted-5)] text-sm font-medium text-[var(--ui-secondary)] hover:bg-[var(--ui-muted-10)] cursor-pointer transition">
+                            @svg('heroicon-o-arrow-up-tray', 'w-4 h-4')
+                            Audio-Datei hochladen
+                            <input type="file" class="hidden"
+                                   accept="audio/*,.m4a,.mp3,.wav,.webm,.ogg,.aac,.flac,.mp4"
+                                   @change="pickFile($event)">
+                        </label>
+                        <div class="text-xs text-[var(--ui-muted)] -mt-2">m4a, mp3, wav u. a. — inkl. Sprechererkennung</div>
                     </div>
 
                     {{-- Recording state --}}
