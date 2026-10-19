@@ -96,9 +96,12 @@ class WhisperServiceProvider extends ServiceProvider
             $registry->register(new \Platform\Whisper\Tools\GetTranscriptTool());
             $registry->register(new \Platform\Whisper\Tools\ImportRecordingTool());
             $registry->register(new \Platform\Whisper\Tools\AppendSegmentsTool());
-            // PlaudSyncTool wandered into the Inbox module as
-            // inbox.plaud.sync.POST — Plaud is a vendor adapter, not part
-            // of Whisper's audio-pipeline concern.
+            // Stance 2: whisper ist die EINE quellen-agnostische Aufnahme-Schicht.
+            // Plaud (vor-transkribiert) wird eine completed WhisperRecording →
+            // Observer ingestet in den Eingang. (Früher: inbox.plaud.sync direkt —
+            // bewusst umgedreht, damit Plaud-Aufnahmen auch in whispers Store/Suche
+            // landen und künftige Anbieter denselben Weg nehmen.)
+            $registry->register(new \Platform\Whisper\Tools\PlaudSyncTool());
             // Q&A (AskRecordingQuestionTool) moved to the Inbox enrichment
             // pipeline along with summaries and action items.
         } catch (\Throwable $e) {
