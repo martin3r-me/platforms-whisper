@@ -83,20 +83,9 @@ class IngestRecordingToInboxJob implements ShouldQueue
         // "supplements" relation. Decoupled via interface — Whisper never
         // touches Inbox tables or models directly.
         $this->linkSupplementsIfNeeded($recording, $item);
-
-        // Trigger fürs Flow-Gewebe: die Aufnahme ist im Eingang gelandet → eine
-        // Automation korreliert sie SOFORT zum zeitlich passenden Termin (falls nicht
-        // schon explizit verlinkt). Macht Transkript→Termin instant statt per 15-Min-Cron.
-        if (class_exists(\Platform\Core\Inbox\Events\ItemDelivered::class)) {
-            \Platform\Core\Inbox\Events\ItemDelivered::dispatch(
-                (int) $item->id,
-                (int) $item->user_id,
-                (int) $item->team_id,
-                'recording',
-                'whisper_recording',
-                (int) $recording->id,
-            );
-        }
+        // Korrelation (Transkript→Termin) macht InboxAudioIngestionService::ingest()
+        // bereits inline/synchron für JEDE Aufnahme (Plaud wie whisper) — kein
+        // zusätzliches Event nötig.
     }
 
     /**
