@@ -20,8 +20,10 @@ class IngestRecordingToInboxJob implements ShouldQueue
 
     public function handle(): void
     {
-        $serviceClass = '\\Platform\\Inbox\\Services\\InboxAudioIngestionService';
-        if (!class_exists($serviceClass)) {
+        // Aufnahme-Ingestion über die Core-Naht — whisper kennt das inbox-Modul
+        // nicht mehr (Materialisierung liegt hinter RecordingIngestion).
+        $contract = '\\Platform\\Core\\Inbox\\Contracts\\RecordingIngestion';
+        if (!interface_exists($contract)) {
             return;
         }
 
@@ -32,7 +34,7 @@ class IngestRecordingToInboxJob implements ShouldQueue
 
         $audioRef = $this->resolveAudioReference($recording);
 
-        // Build the contract payload that Inbox expects.
+        // Build the neutral ingestion payload.
         $payload = [
             'team_id' => $recording->team_id,
             'user_id' => $recording->created_by_user_id,
@@ -53,73 +55,49 @@ class IngestRecordingToInboxJob implements ShouldQueue
         ];
 
         try {
-            $item = app($serviceClass)->ingest($payload);
+            $itemId = app($contract)->ingest($payload);
         } catch (\Throwable $e) {
             $this->recordWarning($recording, 'ingest failed: ' . $e->getMessage());
             return;
         }
 
-        if (!$item) {
+        if (!$itemId) {
             $this->recordWarning($recording, 'ingest returned null — payload likely missing a required field.');
             return;
         }
 
-        // Verify the audio actually attached on the Inbox side. attachAudioFile
-        // inside InboxAudioIngestionService logs-only on failure, which would
-        // leave the Inbox item with no playback and us none the wiser.
-        if ($audioRef !== null) {
-            $attached = $item->getOrderedFileReferences()
-                ->contains(fn ($r) => ($r->meta['kind'] ?? null) === 'audio_original');
-            if (!$attached) {
-                $this->recordWarning(
-                    $recording,
-                    'InboxItem #' . $item->id . ' wurde angelegt, aber das Audio-File ist nicht angehaengt.'
-                );
-            }
-        }
-
-        // If the client supplied a meeting (or other primary) InboxItem id
-        // at upload time, ask the Inbox link contract to record a
-        // "supplements" relation. Decoupled via interface — Whisper never
-        // touches Inbox tables or models directly.
-        $this->linkSupplementsIfNeeded($recording, $item);
-        // Korrelation (Transkript→Termin) macht InboxAudioIngestionService::ingest()
-        // bereits inline/synchron für JEDE Aufnahme (Plaud wie whisper) — kein
-        // zusätzliches Event nötig.
+        // If the Mac client supplied a target meeting at upload time, assign the
+        // recording to it over the Core ItemLinking seam (supplements + Org-Kaskade).
+        // Whisper never touches Inbox tables/models directly.
+        $this->linkTargetIfNeeded($recording, (int) $itemId);
+        // Korrelation (Transkript→Termin) läuft bereits inline in der Ingestion
+        // (LinkRule) für JEDE Aufnahme — kein zusätzliches Event nötig.
     }
 
     /**
-     * Resolves the Inbox link contract from the container and creates a
-     * Supplements link between the freshly-ingested recording InboxItem
-     * and the target meeting InboxItem the Mac client passed at upload.
-     *
-     * Soft-coupled: if the Inbox module is gone, the contract isn't
-     * bound, or the target item disappeared between upload and ingest,
-     * we log a warning to the recording and move on. The recording
-     * InboxItem still stands on its own.
+     * Assigns the freshly-ingested recording to the target meeting the Mac client
+     * passed at upload — over the Core ItemLinking seam. Soft-coupled: if the seam
+     * isn't bound or the target vanished, we log a warning and move on; the
+     * recording item still stands on its own.
      */
-    private function linkSupplementsIfNeeded(WhisperRecording $recording, $recordingInboxItem): void
+    private function linkTargetIfNeeded(WhisperRecording $recording, int $recordingItemId): void
     {
         $targetId = (int) ($recording->target_inbox_item_id ?? 0);
         if ($targetId <= 0) {
             return;
         }
 
-        $contract = '\\Platform\\Inbox\\Contracts\\InboxItemLinkContract';
+        $contract = '\\Platform\\Core\\Inbox\\Contracts\\ItemLinking';
         if (!interface_exists($contract)) {
-            $this->recordWarning($recording, 'InboxItemLinkContract not loaded — no link created.');
+            $this->recordWarning($recording, 'ItemLinking not loaded — no link created.');
             return;
         }
 
         try {
-            app($contract)->supplements(
-                supplementaryItemId: (int) $recordingInboxItem->id,
-                primaryItemId: $targetId,
-                meta: ['source' => 'whisper.upload.dual', 'recording_id' => $recording->id],
-            );
-            \Log::info('Whisper→Inbox: linked supplements', [
+            app($contract)->assign($recordingItemId, $targetId);
+            \Log::info('Whisper→Inbox: assigned recording to target', [
                 'recording_id' => $recording->id,
-                'from' => $recordingInboxItem->id,
+                'from' => $recordingItemId,
                 'to' => $targetId,
             ]);
         } catch (\Throwable $e) {

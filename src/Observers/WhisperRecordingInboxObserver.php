@@ -6,12 +6,13 @@ use Platform\Whisper\Jobs\IngestRecordingToInboxJob;
 use Platform\Whisper\Models\WhisperRecording;
 
 /**
- * Bridges Whisper-completed recordings into the Inbox module.
+ * Bridges Whisper-completed recordings into the Eingang over the Core
+ * RecordingIngestion seam.
  *
  * Fires when a recording transitions from non-completed to completed,
- * dispatching an async job that hands off the transcript + segments +
- * speakers to InboxAudioIngestionService. Soft-coupled: if Inbox isn't
- * installed, the job no-ops.
+ * dispatching an async job that hands the transcript + segments + speakers
+ * to the Core seam. Soft-coupled: if no ingestion impl is bound (inbox absent),
+ * the job no-ops. Whisper references no Inbox namespace directly.
  */
 class WhisperRecordingInboxObserver
 {
@@ -24,8 +25,8 @@ class WhisperRecordingInboxObserver
             return;
         }
 
-        // The bridge itself stays soft-coupled — if Inbox isn't loaded, do nothing.
-        if (!class_exists(\Platform\Inbox\Services\InboxAudioIngestionService::class)) {
+        // Soft-coupled — ohne gebundene Ingestion-Naht tut der Job nichts.
+        if (!interface_exists(\Platform\Core\Inbox\Contracts\RecordingIngestion::class)) {
             return;
         }
 
