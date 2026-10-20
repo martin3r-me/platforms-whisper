@@ -6,14 +6,11 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Platform\Core\Traits\HasContextFileReferences;
-use Platform\Organization\Traits\HasOrganizationContexts;
 use Symfony\Component\Uid\UuidV7;
 
 class WhisperRecording extends Model
 {
     use HasContextFileReferences;
-    use HasOrganizationContexts;
-
     protected $table = 'whisper_recordings';
 
     public const STATUS_PENDING = 'pending';
