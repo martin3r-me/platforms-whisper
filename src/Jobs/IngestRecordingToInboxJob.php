@@ -22,7 +22,10 @@ class IngestRecordingToInboxJob implements ShouldQueue
     {
         // Aufnahme-Ingestion über die Core-Naht — whisper kennt das inbox-Modul
         // nicht mehr (Materialisierung liegt hinter RecordingIngestion).
-        $contract = '\\Platform\\Core\\Inbox\\Contracts\\RecordingIngestion';
+        // ::class (kein führender Backslash!) — sonst findet der Container die
+        // unter dem FQCN ohne führenden \ registrierte Bindung nicht und
+        // versucht, das Interface direkt zu bauen → "not instantiable".
+        $contract = \Platform\Core\Inbox\Contracts\RecordingIngestion::class;
         if (!interface_exists($contract)) {
             return;
         }
@@ -87,7 +90,7 @@ class IngestRecordingToInboxJob implements ShouldQueue
             return;
         }
 
-        $contract = '\\Platform\\Core\\Inbox\\Contracts\\ItemLinking';
+        $contract = \Platform\Core\Inbox\Contracts\ItemLinking::class;
         if (!interface_exists($contract)) {
             $this->recordWarning($recording, 'ItemLinking not loaded — no link created.');
             return;
