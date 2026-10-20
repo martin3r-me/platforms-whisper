@@ -80,6 +80,12 @@ class WhisperServiceProvider extends ServiceProvider
         \Platform\Whisper\Models\WhisperRecording::observe(
             \Platform\Whisper\Observers\WhisperRecordingInboxObserver::class,
         );
+
+        if ($this->app->runningInConsole()) {
+            $this->commands([
+                \Platform\Whisper\Console\Commands\RebridgeRecordings::class,
+            ]);
+        }
     }
 
     protected function registerTools(): void

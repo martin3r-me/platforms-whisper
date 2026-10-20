@@ -18,6 +18,7 @@ class WhisperRecordingInboxObserver
 {
     public function updated(WhisperRecording $recording): void
     {
+        // Übergang non-completed → completed (z.B. Browser-Upload nach Transkription).
         if (!$recording->wasChanged('status')) {
             return;
         }
@@ -25,7 +26,28 @@ class WhisperRecordingInboxObserver
             return;
         }
 
-        // Soft-coupled — ohne gebundene Ingestion-Naht tut der Job nichts.
+        $this->dispatchIngest($recording);
+    }
+
+    public function created(WhisperRecording $recording): void
+    {
+        // Plaud-synced recordings werden bereits mit status=completed INSERTed.
+        // Beim Insert füllt Eloquent die changed-attributes NICHT (syncChanges()
+        // läuft nur in performUpdate), d.h. wasChanged('status') ist im created-
+        // Event IMMER false. Früher lief created() über updated() und blieb an
+        // genau diesem Gate hängen → die Aufnahme erreichte den Eingang nie.
+        // Deshalb hier direkt dispatchen, ohne das wasChanged-Gate.
+        if ($recording->status === WhisperRecording::STATUS_COMPLETED) {
+            $this->dispatchIngest($recording);
+        }
+    }
+
+    /**
+     * Dispatcht den Ingest-Job in den Eingang. Soft-coupled: ohne gebundene
+     * RecordingIngestion-Naht (inbox-Modul abwesend) ein No-op.
+     */
+    private function dispatchIngest(WhisperRecording $recording): void
+    {
         if (!interface_exists(\Platform\Core\Inbox\Contracts\RecordingIngestion::class)) {
             return;
         }
@@ -37,15 +59,6 @@ class WhisperRecordingInboxObserver
                 'recording_id' => $recording->id,
                 'error' => $e->getMessage(),
             ]);
-        }
-    }
-
-    public function created(WhisperRecording $recording): void
-    {
-        // If a recording is created already with status=completed (e.g. Plaud
-        // sync of an already-transcribed file), fire on create too.
-        if ($recording->status === WhisperRecording::STATUS_COMPLETED) {
-            $this->updated($recording);
         }
     }
 }
