@@ -55,6 +55,11 @@ class PlaudSyncTool implements ToolContract, ToolMetadataContract
                     'type' => 'object',
                     'description' => 'start_at (ISO/UTC), duration_ms, serial_number.',
                 ],
+                'note_content' => [
+                    'type' => 'string',
+                    'description' => 'Optional: Plauds eigene Notiz/Zusammenfassung als Markdown (aus get_note). '
+                        . 'Wird als sekundäre Enrichment am Eingang-Item abgelegt — nicht neu erzeugt.',
+                ],
                 'language' => ['type' => 'string', 'description' => 'Optional: ISO-Sprachcode. Default: "de".'],
             ],
             'required' => ['file_id', 'title', 'segments'],
@@ -95,11 +100,16 @@ class PlaudSyncTool implements ToolContract, ToolMetadataContract
 
         [$transcript, $segments, $speakerMap] = $this->build($rawSegments);
 
+        // Plauds eigene Notiz/Zusammenfassung roh mitnehmen (Quell-Artefakt).
+        // Wird von der Ingestion als sekundäre Enrichment am Item abgelegt.
+        $noteContent = trim((string) ($arguments['note_content'] ?? ''));
+
         $recording = WhisperRecording::create([
             'team_id' => $teamId,
             'created_by_user_id' => $context->user?->id,
             'title' => $title,
             'transcript' => $transcript,
+            'source_note' => $noteContent !== '' ? $noteContent : null,
             'segments' => $segments,
             'speaker_map' => $speakerMap,
             'speakers_count' => count($speakerMap),

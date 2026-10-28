@@ -50,6 +50,9 @@ class IngestRecordingToInboxJob implements ShouldQueue
             'audio_recorded_at' => $recording->recorded_at ?? $recording->created_at,
             'speakers' => $this->collectSpeakers($recording),
             'segments' => $this->collectSegments($recording),
+            // Vom Anbieter mitgelieferte Notiz (z. B. Plauds Zusammenfassung) —
+            // Inbox legt sie als sekundäre Enrichment ab, falls vorhanden.
+            'vendor_note' => $recording->source_note ?: null,
             // Audio reference — TranscribeRecordingJob persists the original
             // upload via ContextFileService before discarding the tmp file.
             // We hand the resulting context_file_id over to Inbox, which adds
