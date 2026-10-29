@@ -34,6 +34,7 @@ class WhisperServiceProvider extends ServiceProvider
             PlatformCore::registerModule([
                 'key'        => 'whisper',
                 'title'      => 'Whisper',
+                'group'      => 'content',
                 'routing'    => config('whisper.routing'),
                 'guard'      => config('whisper.guard'),
                 'navigation' => config('whisper.navigation'),
