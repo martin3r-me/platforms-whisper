@@ -47,6 +47,12 @@
                         mediaRecorder: null,
                         chunks: [],
                         stream: null,
+                        micStream: null,
+                        displayStream: null,
+                        audioCtx: null,
+                        stereo: false,
+                        withSystemAudio: localStorage.getItem('whisper.systemAudio') === '1',
+                        canSystemAudio: !!(navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia && (window.AudioContext || window.webkitAudioContext)),
                         startedAt: null,
                         accumulated: 0,
                         elapsed: 0,
@@ -57,11 +63,45 @@
                                 this.error = 'Dein Browser unterstützt keine Audioaufnahme.';
                             }
                         },
+                        toggleSystemAudio() {
+                            localStorage.setItem('whisper.systemAudio', this.withSystemAudio ? '1' : '0');
+                        },
+                        cleanupStreams() {
+                            [this.micStream, this.displayStream, this.stream].forEach(s => {
+                                if (s) s.getTracks().forEach(t => t.stop());
+                            });
+                            if (this.audioCtx) { this.audioCtx.close().catch(() => {}); }
+                            this.micStream = null;
+                            this.displayStream = null;
+                            this.stream = null;
+                            this.audioCtx = null;
+                        },
                         async start() {
                             this.error = null;
                             this.info = null;
+                            this.stereo = false;
+                            if (this.withSystemAudio && this.canSystemAudio) {
+                                try {
+                                    this.displayStream = await navigator.mediaDevices.getDisplayMedia({
+                                        video: { frameRate: 1 },
+                                        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+                                        systemAudio: 'include',
+                                        selfBrowserSurface: 'exclude',
+                                    });
+                                } catch (e) {
+                                    this.error = 'Bildschirm-/Tab-Freigabe abgebrochen oder verweigert: ' + e.message;
+                                    return;
+                                }
+                                // Die Videospur wird nie aufgenommen.
+                                this.displayStream.getVideoTracks().forEach(t => t.stop());
+                                if (this.displayStream.getAudioTracks().length === 0) {
+                                    this.cleanupStreams();
+                                    this.error = 'Die Freigabe enthält keinen Ton. Bitte einen Tab oder Bildschirm mit der Option Audio teilen (nur Chrome/Edge).';
+                                    return;
+                                }
+                            }
                             try {
-                                this.stream = await navigator.mediaDevices.getUserMedia({
+                                this.micStream = await navigator.mediaDevices.getUserMedia({
                                     audio: {
                                         channelCount: 1,
                                         echoCancellation: true,
@@ -70,8 +110,29 @@
                                     },
                                 });
                             } catch (e) {
+                                this.cleanupStreams();
                                 this.error = 'Mikrofon-Zugriff verweigert: ' + e.message;
                                 return;
+                            }
+                            if (this.displayStream) {
+                                // Mikro = linker Kanal (Sprecher A), PC-Sound = rechter Kanal (Sprecher B)
+                                const Ctx = window.AudioContext || window.webkitAudioContext;
+                                this.audioCtx = new Ctx();
+                                const merger = this.audioCtx.createChannelMerger(2);
+                                this.audioCtx.createMediaStreamSource(this.micStream).connect(merger, 0, 0);
+                                this.audioCtx.createMediaStreamSource(this.displayStream).connect(merger, 0, 1);
+                                const dest = this.audioCtx.createMediaStreamDestination();
+                                dest.channelCount = 2;
+                                merger.connect(dest);
+                                this.stream = dest.stream;
+                                this.stereo = true;
+                                this.displayStream.getAudioTracks()[0].addEventListener('ended', () => {
+                                    if (this.state === 'recording' || this.state === 'paused') {
+                                        this.info = 'Die Freigabe wurde beendet — die Aufnahme läuft nur mit dem Mikrofon weiter.';
+                                    }
+                                });
+                            } else {
+                                this.stream = this.micStream;
                             }
                             this.chunks = [];
                             const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
@@ -79,13 +140,13 @@
                                 : (MediaRecorder.isTypeSupported('audio/webm')
                                     ? 'audio/webm'
                                     : (MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : ''));
-                            const opts = { audioBitsPerSecond: 24000 };
+                            const opts = { audioBitsPerSecond: this.stereo ? 48000 : 24000 };
                             if (mime) opts.mimeType = mime;
                             this.mediaRecorder = new MediaRecorder(this.stream, opts);
                             this.mediaRecorder.addEventListener('dataavailable', (e) => {
                                 if (e.data && e.data.size > 0) this.chunks.push(e.data);
                             });
-                            this.mediaRecorder.addEventListener('stop', () => this.upload());
+                            this.mediaRecorder.addEventListener('stop', () => { this.cleanupStreams(); this.upload(); });
                             // 1-Sekunden-Timeslice → regelmäßige dataavailable Events,
                             // damit auch lange Aufnahmen sauber als Blob enden.
                             this.mediaRecorder.start(1000);
@@ -119,15 +180,14 @@
                             if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
                                 this.mediaRecorder.stop();
                             }
-                            if (this.stream) {
-                                this.stream.getTracks().forEach(t => t.stop());
-                            }
+                            // Streams/AudioContext erst im stop-Event des Recorders freigeben (cleanupStreams),
+                            // damit das Aufnahmeende nicht abgeschnitten wird.
                             this.state = 'uploading';
                         },
                         async upload() {
                             const blob = new Blob(this.chunks, { type: this.mediaRecorder?.mimeType || 'audio/webm' });
                             const ext = (this.mediaRecorder?.mimeType || '').includes('mp4') ? 'm4a' : 'webm';
-                            await this.send(blob, 'audio.' + ext);
+                            await this.send(blob, 'audio.' + ext, this.stereo);
                         },
                         async pickFile(event) {
                             const file = event.target.files && event.target.files[0];
@@ -137,11 +197,12 @@
                             this.state = 'uploading';
                             await this.send(file, file.name);
                         },
-                        async send(blob, filename) {
+                        async send(blob, filename, multichannel = false) {
                             const sizeMb = (blob.size / 1024 / 1024).toFixed(1);
                             this.info = 'Upload (' + sizeMb + ' MB) läuft…';
                             const fd = new FormData();
                             fd.append('audio', blob, filename);
+                            if (multichannel) fd.append('multichannel', '1');
                             const csrf = document.querySelector('meta[name=&quot;csrf-token&quot;]')?.getAttribute('content');
                             try {
                                 const res = await fetch(this.uploadUrl, {
@@ -197,6 +258,12 @@
                             <div class="text-base font-medium text-[var(--ui-secondary)]">Aufnahme starten</div>
                             <div class="text-xs text-[var(--ui-muted)] mt-0.5">Klicke den Button und sprich los</div>
                         </div>
+                        <template x-if="canSystemAudio">
+                            <label class="inline-flex items-center gap-2 text-sm text-[var(--ui-secondary)] cursor-pointer" title="Nur Chrome/Edge. Unter macOS meist nur Tab-Audio. Am besten mit Kopfhörer aufnehmen.">
+                                <input type="checkbox" x-model="withSystemAudio" @change="toggleSystemAudio()" class="rounded border-[var(--ui-border)]">
+                                PC-Sound mit aufnehmen
+                            </label>
+                        </template>
                         <label class="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-[var(--ui-border)] bg-[var(--ui-muted-5)] text-sm font-medium text-[var(--ui-secondary)] hover:bg-[var(--ui-muted-10)] cursor-pointer transition">
                             @svg('heroicon-o-arrow-up-tray', 'w-4 h-4')
                             Audio-Datei hochladen

@@ -21,7 +21,9 @@ class WhisperUploadController extends Controller
     {
         $request->validate([
             'audio' => 'required|file|max:512000', // 500 MB
+            'multichannel' => 'nullable|boolean',
         ]);
+        $multichannel = $request->boolean('multichannel');
 
         $user = Auth::user();
         if (!$user) {
@@ -65,7 +67,7 @@ class WhisperUploadController extends Controller
                 'file_size_bytes' => $sizeBytes,
             ]);
 
-            TranscribeRecordingJob::dispatch($recording->id, $tmpPath, 'de');
+            TranscribeRecordingJob::dispatch($recording->id, $tmpPath, 'de', $multichannel);
 
             return response()->json([
                 'id' => $recording->id,
