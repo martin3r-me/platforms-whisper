@@ -9,34 +9,36 @@ return [
     'guard' => 'web',
 
     /**
-     * AssemblyAI - Transcription + Speaker Diarization Provider.
-     * Setze ASSEMBLYAI_API_KEY in .env.
+     * Transkription auf dem EIGENEN Server (keine Fremdleistung) — derselbe Dienst,
+     * den Parlan nutzt. Jede Instanz kann ihren eigenen Server eintragen.
+     *
+     *   stt_url          Basis-URL eines OpenAI-kompatiblen Whisper-Servers
+     *                    (POST {stt_url}/v1/audio/transcriptions). Leer = keine Transkription:
+     *                    Aufnahmen werden gesichert und als failed markiert, bis ein Server
+     *                    eingetragen ist (dann: php artisan whisper:retranscribe --failed).
+     *   speakers_url     Optional: Text mit Sprechern in einem Aufruf (Whisper + pyannote), volle URL.
+     *   diarization_url  Optional: nur Sprechererkennung (pyannote), volle URL. Vertrag siehe
+     *                    LocalTranscriptionService::diarize(). Beide leer = ein Sprecher pro Spur.
+     *
+     *   Kurzform: GPU_GATE_URL + GPU_GATE_KEY setzen — daraus ergeben sich alle Pfade.
      */
-    'assemblyai' => [
-        'api_key' => env('ASSEMBLYAI_API_KEY'),
-
-        // HTTP-Timeout fuer Upload / Submit / Poll (Sekunden).
-        'request_timeout' => (int) env('WHISPER_AAI_REQUEST_TIMEOUT', 120),
-
-        // Polling-Intervall in Sekunden.
-        'poll_interval_seconds' => (int) env('WHISPER_AAI_POLL_INTERVAL', 3),
-
-        // Max. Wartezeit fuer Polling (Sekunden).
-        'max_wait_seconds' => (int) env('WHISPER_AAI_MAX_WAIT', 1500),
-
-        // Speaker Diarization aktivieren.
-        'speaker_labels' => (bool) env('WHISPER_AAI_SPEAKER_LABELS', true),
-
-        // Optional: erwartete Anzahl Sprecher (verbessert Diarization). 0 = automatisch.
-        'speakers_expected' => (int) env('WHISPER_AAI_SPEAKERS_EXPECTED', 0),
-
-        // Speech-Model-Prioritaetsliste (AssemblyAI waehlt den ersten verfuegbaren).
-        // Gueltige Werte (Stand 2026): universal-3-pro, universal-2.
-        // Via ENV als komma-separierte Liste ueberschreibbar.
-        'speech_models' => array_values(array_filter(array_map(
-            'trim',
-            explode(',', (string) env('WHISPER_AAI_SPEECH_MODELS', 'universal-3-pro,universal-2'))
-        ))),
+    'transcription' => [
+        // GPU-Gate (eigene GPU-Box, im VPN, Bearer-Schlüssel): ein Eingang für Whisper large-v3,
+        // pyannote und das Sprachmodell. Die einzelnen WHISPER_*-Werte überschreiben es.
+        'stt_url' => env('WHISPER_STT_URL') ?: env('GPU_GATE_URL') ?: env('PARLAN_STT_URL', ''),
+        'stt_model' => env('WHISPER_STT_MODEL', 'whisper-1'),
+        'stt_api_key' => env('WHISPER_STT_API_KEY') ?: env('GPU_GATE_KEY', ''),
+        // Text MIT Sprechern in einem Aufruf (Whisper + pyannote auf dem Server zugeordnet) — bevorzugt.
+        'speakers_url' => env('WHISPER_SPEAKERS_URL')
+            ?: (env('GPU_GATE_URL') ? rtrim(env('GPU_GATE_URL'), '/') . '/v1/audio/transcriptions/speakers' : ''),
+        // Nur „wer spricht wann" — Rückfall, falls speakers_url keine Sprecher je Segment liefert.
+        'diarization_url' => env('WHISPER_DIARIZATION_URL')
+            ?: (env('GPU_GATE_URL') ? rtrim(env('GPU_GATE_URL'), '/') . '/v1/audio/diarize' : ''),
+        'diarization_api_key' => env('WHISPER_DIARIZATION_API_KEY') ?: env('GPU_GATE_KEY', ''),
+        // HTTP-Timeout je Aufruf (Sekunden) — lange Meetings brauchen Zeit.
+        'timeout' => (int) env('WHISPER_STT_TIMEOUT', 1800),
+        // Optional: erwartete Anzahl Sprecher (hilft der Diarisierung). 0 = automatisch.
+        'speakers_expected' => (int) env('WHISPER_SPEAKERS_EXPECTED', 0),
     ],
 
     'navigation' => [

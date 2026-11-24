@@ -39,7 +39,7 @@ class WhisperOverviewTool implements ToolContract, ToolMetadataContract
                 ],
                 'data_model' => [
                     'whisper_recordings' => [
-                        'description' => 'Aufnahme mit Transkript und Sprecher-Segmenten. Kann via Browser-Recorder (AssemblyAI) oder externen Import erstellt werden. Hoehere Layer (Summary, Action Items, Q&A) liegen im Inbox-Modul.',
+                        'description' => 'Aufnahme mit Transkript und Sprecher-Segmenten. Kommt aus jeder Quelle (Browser, Mac, Upload, Plaud, App); Whisper transkribiert auf dem eigenen Server. Hoehere Layer (Summary, Action Items, Q&A) liegen im Inbox-Modul.',
                         'key_fields' => [
                             'id', 'uuid', 'team_id', 'title', 'transcript',
                             'segments (JSON legacy)', 'speakers_count', 'speaker_map',
@@ -78,7 +78,8 @@ class WhisperOverviewTool implements ToolContract, ToolMetadataContract
                         'step_2' => 'whisper.recordings.segments.APPEND - Segmente in Batches (max ~50) anhaengen',
                         'step_3' => 'APPEND mit is_last_batch=true - Finalisiert Recording (baut Transcript, zaehlt Speaker)',
                     ],
-                    'plaud' => 'Plaud-Import lebt jetzt im Inbox-Modul (inbox.plaud.sync.POST). Plaud-Items landen direkt im Inbox; Whisper bekommt keine Plaud-Recordings mehr.',
+                    'plaud' => 'whisper.plaud.sync.POST mit file_id, title und audio_url (presigned_url aus Plaud get_file, sofort übergeben). Whisper lädt das Audio, transkribiert selbst und gibt die Aufnahme in den Eingang. Ohne audio_url werden Plauds segments übernommen (Notlösung). Der Server-Sync läuft automatisch über user-connectors:plaud-sync.',
+                    'audio_api' => 'POST /api/whisper/recordings (Bearer): audio + source + source_id (Dedup) — der allgemeine Audio-Eingang für Apps und weitere Quellen.',
                 ],
                 'entity_linking' => [
                     'description' => 'Recordings koennen mit Organization-Entities (Projekt, Kunde, etc.) verknuepft werden.',
@@ -111,9 +112,6 @@ class WhisperOverviewTool implements ToolContract, ToolMetadataContract
                     'write' => [
                         'whisper.recordings.PUT' => 'Recording aktualisieren (Titel, Summary, etc.)',
                         'whisper.recordings.DELETE' => 'Recording loeschen (nicht reversibel)',
-                    ],
-                    'ai' => [
-                        'whisper.recording.question.POST' => 'Frage an Transkript via LeMUR (nur bei AssemblyAI-Recordings mit provider_id)',
                     ],
                 ],
             ]);

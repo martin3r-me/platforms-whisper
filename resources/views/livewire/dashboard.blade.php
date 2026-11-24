@@ -37,7 +37,7 @@
             </div>
 
             {{-- Recorder Panel --}}
-            <x-ui-panel title="Audio aufnehmen" subtitle="Lange Meetings sind ok — direkter Upload an AssemblyAI inkl. Sprechererkennung.">
+            <x-ui-panel title="Audio aufnehmen" subtitle="Lange Meetings sind ok — transkribiert auf dem eigenen Server, inkl. Sprechererkennung.">
                 <div class="px-6 py-10 flex flex-col items-center justify-center gap-5"
                      wire:ignore
                      x-data="{

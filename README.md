@@ -1,18 +1,23 @@
 # Platform Whisper Module
 
-Audio-Aufnahme → **AssemblyAI** Transkription mit Speaker Diarization (oder Dual-Channel Multichannel) → Transkript + Segmente + Sprecher landen persistent.
+Audio aus jeder Quelle → Transkription auf dem **eigenen Server** (Whisper + optional pyannote für Sprecher; Dual-Spur je Kanal) → Transkript + Segmente + Sprecher landen persistent. Keine Fremdleistung.
 
 **Scope:** Whisper liefert Transkripte und Sprecher-Segmente. Höhere Layer (Zusammenfassungen, Action Items, Q&A, semantischer Titel) leben im **Inbox-Modul** als Enrichment-Pipeline. Whisper feuert nach `status=completed` einen Observer, der das Recording in den Inbox-Triage-Layer übergibt.
 
 ## Features
 
+- **Ein Eingang für alle Quellen** (`RecordingIntakeService`): Browser, Mac-Client, Datei-Upload, Plaud, eigene App. Audio ist die Grundlage — es wird beim Eingang gesichert, dann transkribiert Whisper selbst. Dedup über `source` + `source_id`
+- Allgemeiner Audio-Eingang `POST /api/whisper/recordings` (Bearer-Auth): `audio`, `source`, `source_id`, optional `recorded_at`, `title`, `language`, `multichannel`, `device_serial`, `meeting_inbox_item_id`
+- Plaud: `user-connectors:plaud-sync` (alle 15 Min.) übergibt Plauds Audio-Link an `whisper.plaud.sync`; Plauds Notiz bleibt als `source_note` zum Vergleich
+- Neu transkribieren aus dem gesicherten Audio: `php artisan whisper:retranscribe --id=<id>` oder `--failed`
 - Browser-Recorder via MediaRecorder API (Opus, mono)
-- Dual-Channel-Upload (`POST /api/whisper/recordings/dual`, Bearer-Auth): zwei WAV-Spuren (`mic` + `loopback`) werden serverseitig zu Stereo gemerged und an AssemblyAI im Multichannel-Mode geschickt
-- **Speaker Diarization** bei Mono / **Multichannel** bei Dual-Spur (Kanal-Identifier statt VAD-Ratespiel)
+- Dual-Channel-Upload (`POST /api/whisper/recordings/dual`, Bearer-Auth): zwei WAV-Spuren (`mic` + `loopback`) werden zu Stereo gemerged gesichert und je Spur transkribiert (mic = `A`, Gegenseite = `B`, mit pyannote weiter aufgeteilt)
+- **Sprechererkennung** bei Mono über pyannote (optional) — Whisper-Wörter werden den pyannote-Zeitfenstern zugeordnet
+- Plaud: solange keine Sprechererkennung eingerichtet ist, wird Plauds Transkript (mit Sprechern/Namen) übernommen, das Audio aber gesichert
 - **Queue-basiert**: Upload kehrt sofort zurück, Job verarbeitet im Hintergrund
 - **Audio-Persistence**: Original-File wandert via `ContextFileService` auf S3, Recording behält File-Reference (`kind: audio_original`)
 - **Inbox-Bridge**: Fertige Recordings werden automatisch als `InboxItem` mit Channel `recording` in die Inbox ingested
-- **Organization-Linking**: `HasOrganizationContexts` (morph_alias `whisper_recording`)
+- **Organization-Linking**: über `organization.dimension_links` (morph_alias `whisper_recording`)
 
 ## Voraussetzungen (Host-App)
 
@@ -35,20 +40,47 @@ composer update martin3r/platforms-whisper
 php artisan migrate
 ```
 
-### 2. API Keys
+### 2. Transkriptions-Server
+
+Kurzform für die eigene GPU-Box (Gate mit Bearer-Schlüssel): Whisper large-v3, pyannote und alle Pfade ergeben sich daraus.
 
 ```env
-# Transkription + Diarization
-ASSEMBLYAI_API_KEY=...
+GPU_GATE_URL=http://<gpu-gate-host>:<port>
+GPU_GATE_KEY=...   # Bearer-Schlüssel des Gates (beim Betrieb der GPU-Box erfragen)
 ```
+
+Bevorzugt wird `POST {GPU_GATE_URL}/v1/audio/transcriptions/speakers` (Text mit Sprechern in einem Aufruf). Liefert der Pfad keine Sprecher je Segment, ordnet Whisper selbst zu (`/v1/audio/transcriptions` + `/v1/audio/diarize`).
+
+Einzeln überschreibbar:
+
+```env
+# OpenAI-kompatibler Whisper-Server (POST {url}/v1/audio/transcriptions) — z. B. derselbe wie Parlan.
+# Fällt auf PARLAN_STT_URL zurück. Leer = keine Transkription (Aufnahmen werden gesichert, Status failed).
+WHISPER_STT_URL=http://stt.intern:8000
+WHISPER_STT_MODEL=whisper-1
+
+# Optional: Sprechererkennung (pyannote/speaker-diarization-community-1), volle URL
+WHISPER_DIARIZATION_URL=http://stt.intern:8001/diarize
+```
+
+**Vertrag Sprechererkennung:** `POST {WHISPER_DIARIZATION_URL}`, multipart `file` (optional `num_speakers`), Antwort:
+
+```json
+{
+  "segments": [{"start": 0.5, "end": 3.2, "speaker": "SPEAKER_00"}],
+  "exclusive_segments": [{"start": 0.5, "end": 3.2, "speaker": "SPEAKER_00"}]
+}
+```
+
+`exclusive_segments` (pyannote community-1: höchstens ein Sprecher gleichzeitig) ist optional und wird bevorzugt. Der Whisper-Server sollte `response_format=verbose_json` mit `timestamp_granularities[]=word` unterstützen (Wort-Zeitstempel → saubere Sprecherwechsel); ohne Wörter wird auf Segment-Ebene zugeordnet.
 
 ### 3. Queue Worker
 
 ```bash
-php artisan queue:work --timeout=1800 --tries=1
+php artisan queue:work --timeout=3600 --tries=1
 ```
 
-Das Polling gegen AssemblyAI läuft während `handle()`. `--timeout=1800` deckt auch stundenlange Meetings ab.
+Die Transkription läuft synchron gegen den eigenen Server während `handle()`; Dual-Spur sind zwei Durchläufe.
 
 ### 4. PHP Limits
 
@@ -73,10 +105,10 @@ Tabelle `whisper_recordings` (Kern-Felder):
 | segments | json | `[{speaker, start, end, text}, …]` |
 | speakers_count | int | Anzahl erkannter Sprecher |
 | speaker_map | json | Optional: A/B/C → Anzeigename |
-| language | string | ISO-Code, AssemblyAI-detected |
+| language | string | ISO-Code (vom Whisper-Server erkannt) |
 | duration_seconds | int | |
-| model | string | z. B. `assemblyai:universal-3-pro` |
-| provider_id | string | AssemblyAI transcript id |
+| model | string | z. B. `local:whisper-1+pyannote`, `import:plaud` |
+| source / source_id | string | Quelle + ID dort (`plaud` / File-ID, `mac`, `upload`, …) — Dedup |
 | status | enum | pending / processing / completed / failed |
 | error_message | text | bei failed |
 
@@ -85,22 +117,22 @@ Tabelle `whisper_recordings` (Kern-Felder):
 1. Upload-Quelle:
    - Browser-Recorder auf `/whisper` → `POST /whisper/upload` (Session-Auth, mono Opus/WebM)
    - Dual-Channel Client → `POST /api/whisper/recordings/dual` (Bearer-Auth, zwei WAVs `mic` + `loopback`, serverseitig zu Stereo gemerged)
-2. Controller speichert Audio in `storage/app/whisper-tmp/`, legt Recording mit `status=pending` an, dispatched `TranscribeRecordingJob`
+   - Plaud → `user-connectors:plaud-sync` → `whisper.plaud.sync`
+   - Eigene App / weitere Quellen → `POST /api/whisper/recordings`
+2. `RecordingIntakeService`: Dedup (`source` + `source_id`), Recording `status=pending`, Original-Audio sofort via `ContextFileService` gesichert (`kind: audio_original`), dispatched `TranscribeRecordingJob`
 3. Job (Worker):
    - Status → `processing`
-   - `AssemblyAiTranscriptionService::transcribe()`: Upload → Submit → Polling bis `completed` (Mono: `speaker_labels`; Dual: `multichannel`)
-   - Recording bekommt `transcript`, `segments`, `speakers_count`, `language`, `duration_seconds`, `provider_id`
-   - Original-Audio wird via `ContextFileService` persistiert (File-Reference `kind: audio_original`)
+   - `LocalTranscriptionService::transcribe()`: Whisper (Wörter + Zeitstempel), optional pyannote (Sprecher), Zuordnung; Dual-Spur je Kanal
+   - Recording bekommt `transcript`, `segments`, `speakers_count`, `language`, `duration_seconds`
    - Status → `completed` → Tmp-Datei wird gelöscht
 4. `WhisperRecordingInboxObserver` feuert auf den completed-Übergang und dispatched `IngestRecordingToInboxJob` → Recording wandert als `InboxItem` in den Inbox-Triage-Layer
 5. Show-Page pollt alle 3 s während `pending`/`processing`, zeigt Sprecher-Blöcke + Fließtext + Inline-Audio-Player
 
 ## Fehler-Handling
 
-- Kein `ASSEMBLYAI_API_KEY` → Job wirft Exception → Status `failed`
-- AssemblyAI-Fehler (Upload/Submit/Poll) → Status `failed`, `error_message` mit API-Response
-- Polling-Timeout (`WHISPER_AAI_MAX_WAIT`) → Status `failed`
-- Bei `failed`: Tmp-Datei wird trotzdem aufgeräumt
+- Kein `WHISPER_STT_URL` → Status `failed` („Keine Transkription eingerichtet")
+- Fehler des Whisper- oder pyannote-Servers → Status `failed`, `error_message` mit Antwort
+- Das Audio ist gesichert → nach Behebung `php artisan whisper:retranscribe --failed`
 
 ## LLM-Tools
 
@@ -115,11 +147,10 @@ Tabelle `whisper_recordings` (Kern-Felder):
 ## Config Overrides
 
 ```env
-WHISPER_AAI_REQUEST_TIMEOUT=120     # HTTP-Timeout pro AssemblyAI-Call
-WHISPER_AAI_POLL_INTERVAL=3         # Polling-Intervall in Sekunden
-WHISPER_AAI_MAX_WAIT=1500           # Maximale Polling-Dauer
-WHISPER_AAI_SPEAKER_LABELS=true     # Diarization an/aus
-WHISPER_AAI_SPEAKERS_EXPECTED=0     # 0 = automatisch, sonst erwartete Anzahl
+WHISPER_STT_API_KEY=                # optional, falls der Whisper-Server einen verlangt
+WHISPER_DIARIZATION_API_KEY=        # optional, falls der pyannote-Dienst einen verlangt
+WHISPER_STT_TIMEOUT=1800            # HTTP-Timeout je Aufruf (Sekunden)
+WHISPER_SPEAKERS_EXPECTED=0         # 0 = automatisch, sonst erwartete Anzahl Sprecher
 ```
 
 ## Out-of-Scope

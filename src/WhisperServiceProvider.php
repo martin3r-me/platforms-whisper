@@ -84,6 +84,7 @@ class WhisperServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->commands([
                 \Platform\Whisper\Console\Commands\RebridgeRecordings::class,
+                \Platform\Whisper\Console\Commands\RetranscribeRecordings::class,
             ]);
         }
     }
@@ -103,8 +104,8 @@ class WhisperServiceProvider extends ServiceProvider
             $registry->register(new \Platform\Whisper\Tools\ImportRecordingTool());
             $registry->register(new \Platform\Whisper\Tools\AppendSegmentsTool());
             // Stance 2: whisper ist die EINE quellen-agnostische Aufnahme-Schicht.
-            // Plaud (vor-transkribiert) wird eine completed WhisperRecording →
-            // Observer ingestet in den Eingang. (Früher: inbox.plaud.sync direkt —
+            // Plaud liefert Audio → RecordingIntakeService → Whisper transkribiert
+            // selbst → Observer ingestet in den Eingang. (Früher: inbox.plaud.sync direkt —
             // bewusst umgedreht, damit Plaud-Aufnahmen auch in whispers Store/Suche
             // landen und künftige Anbieter denselben Weg nehmen.)
             $registry->register(new \Platform\Whisper\Tools\PlaudSyncTool());

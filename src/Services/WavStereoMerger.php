@@ -118,6 +118,67 @@ class WavStereoMerger
     }
 
     /**
+     * Gegenstück zu merge(): Stereo-WAV → zwei Mono-WAVs (links = mic, rechts = loopback),
+     * damit jede Spur einzeln transkribiert werden kann.
+     */
+    public function split(string $stereoPath, string $leftOut, string $rightOut): void
+    {
+        $src = $this->readPcmWav($stereoPath);
+        if ($src['channels'] !== 2) {
+            throw new RuntimeException('WAV-Split: Quelle ist nicht stereo (' . $src['channels'] . ' Kanäle).');
+        }
+
+        $bytesPerSample = intdiv($src['bitsPerSample'], 8);
+        $frameBytes = 2 * $bytesPerSample;
+        $actual = max(0, (filesize($stereoPath) ?: 0) - $src['dataOffset']);
+        $dataBytes = $src['dataSize'] > 0 ? min($src['dataSize'], $actual) : $actual;
+        $frames = intdiv($dataBytes, $frameBytes);
+        if ($frames <= 0) {
+            throw new RuntimeException('WAV-Split: keine Audio-Samples in der Quelldatei.');
+        }
+
+        $in = @fopen($stereoPath, 'rb');
+        $lFp = @fopen($leftOut, 'wb');
+        $rFp = @fopen($rightOut, 'wb');
+        if (!$in || !$lFp || !$rFp) {
+            if ($in) { @fclose($in); }
+            if ($lFp) { @fclose($lFp); }
+            if ($rFp) { @fclose($rFp); }
+            throw new RuntimeException('WAV-Split: konnte Dateien nicht öffnen.');
+        }
+
+        try {
+            $monoSize = $frames * $bytesPerSample;
+            $byteRate = $src['sampleRate'] * $bytesPerSample;
+            foreach ([$lFp, $rFp] as $fp) {
+                $this->writeRiffHeader($fp, $monoSize, $src['sampleRate'], $src['bitsPerSample'], 1, $byteRate, $bytesPerSample);
+            }
+
+            fseek($in, $src['dataOffset']);
+            $chunkFrames = 4096;
+            $remaining = $frames;
+            while ($remaining > 0) {
+                $take = min($chunkFrames, $remaining);
+                $buf = str_pad((string) fread($in, $take * $frameBytes), $take * $frameBytes, "\0");
+                $l = '';
+                $r = '';
+                for ($i = 0; $i < $take; $i++) {
+                    $offset = $i * $frameBytes;
+                    $l .= substr($buf, $offset, $bytesPerSample);
+                    $r .= substr($buf, $offset + $bytesPerSample, $bytesPerSample);
+                }
+                fwrite($lFp, $l);
+                fwrite($rFp, $r);
+                $remaining -= $take;
+            }
+        } finally {
+            @fclose($in);
+            @fclose($lFp);
+            @fclose($rFp);
+        }
+    }
+
+    /**
      * Liest RIFF/fmt/data-Header eines unkomprimierten PCM-WAV.
      *
      * @return array{sampleRate:int,bitsPerSample:int,channels:int,dataOffset:int,dataSize:int}

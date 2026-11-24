@@ -5,12 +5,12 @@ namespace Platform\Whisper\Jobs;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
 use Platform\Whisper\Models\WhisperRecording;
-use Platform\Whisper\Services\AssemblyAiTranscriptionService;
+use Platform\Whisper\Services\LocalTranscriptionService;
+use Platform\Whisper\Services\RecordingAudioStore;
 use Throwable;
 
 class TranscribeRecordingJob implements ShouldQueue
@@ -20,7 +20,7 @@ class TranscribeRecordingJob implements ShouldQueue
     use Queueable;
     use SerializesModels;
 
-    public int $timeout = 1800; // 30 min
+    public int $timeout = 3600; // 60 min — Dual-Spur = zwei Durchläufe auf dem eigenen Server
     public int $tries = 1;
 
     public function __construct(
@@ -32,7 +32,7 @@ class TranscribeRecordingJob implements ShouldQueue
     }
 
     public function handle(
-        AssemblyAiTranscriptionService $transcription,
+        LocalTranscriptionService $transcription,
     ): void {
         $recording = WhisperRecording::find($this->recordingId);
         if (!$recording) {
@@ -43,13 +43,7 @@ class TranscribeRecordingJob implements ShouldQueue
         try {
             $recording->update(['status' => WhisperRecording::STATUS_PROCESSING]);
 
-            $result = $transcription->transcribe(
-                $this->audioPath,
-                basename($this->audioPath),
-                $this->language === 'auto' ? null : $this->language,
-                (bool) config('whisper.assemblyai.speaker_labels', true),
-                $this->multichannel,
-            );
+            $result = $transcription->transcribe($this->audioPath, $this->language, $this->multichannel);
 
             $finalTranscript = (string) ($result['transcript'] ?? '');
             $segments = $result['segments'] ?? [];
@@ -61,8 +55,9 @@ class TranscribeRecordingJob implements ShouldQueue
                 'transcript' => $finalTranscript,
                 'segments' => !empty($segments) ? $segments : null,
                 'speakers_count' => $speakersCount > 0 ? $speakersCount : null,
-                'language' => $detectedLang,
+                'language' => $detectedLang ?? $recording->language,
                 'status' => WhisperRecording::STATUS_COMPLETED,
+                'error_message' => null, // alter Fehler (z. B. vor whisper:retranscribe) ist erledigt
                 'model' => $result['model'] ?? $recording->model,
                 'provider_id' => $result['provider_id'] ?? null,
             ];
@@ -85,7 +80,13 @@ class TranscribeRecordingJob implements ShouldQueue
             $this->persistAudio($recording);
             $recording->update(['status' => $statusUpdate['status']]);
         } catch (Throwable $e) {
-            $preservedPath = $this->preserveAudioOnFailure($this->audioPath, $recording);
+            // Ist das Audio gesichert, reicht whisper:retranscribe — die Tmp-Datei kann weg.
+            $preservedPath = $recording->audioReference()
+                ? null
+                : $this->preserveAudioOnFailure($this->audioPath, $recording);
+            if ($preservedPath === null) {
+                $this->safeUnlink($this->audioPath);
+            }
 
             Log::error('Whisper transcription job failed', [
                 'recording_id' => $this->recordingId,
@@ -151,9 +152,9 @@ class TranscribeRecordingJob implements ShouldQueue
     }
 
     /**
-     * Persist the original audio file via ContextFileService — keeps it on the
-     * platform's default storage disk (S3 in production), under a stable folder
-     * convention.
+     * Sichert das Original-Audio, falls das beim Eingang nicht geklappt hat
+     * (oder die Aufnahme noch über den alten Weg kam). Ist schon Audio
+     * gesichert, passiert nichts.
      *
      * On failure the transcript itself is still valid, so the recording stays
      * status=completed — but we set error_message so the show page can flag
@@ -162,54 +163,8 @@ class TranscribeRecordingJob implements ShouldQueue
      */
     private function persistAudio(WhisperRecording $recording): void
     {
-        if (!is_file($this->audioPath)) {
-            $this->recordPersistAudioWarning($recording, 'Audio-File auf Disk nicht gefunden, bevor Persist startete.');
-            return;
-        }
-        if (!class_exists(\Platform\Core\Services\ContextFileService::class)) {
-            $this->recordPersistAudioWarning($recording, 'Platform\\Core\\Services\\ContextFileService nicht geladen.');
-            return;
-        }
-
         try {
-            $year = $recording->created_at?->format('Y') ?? date('Y');
-            $month = $recording->created_at?->format('m') ?? date('m');
-            $folder = "whisper/audio/{$recording->team_id}/{$year}/{$month}";
-
-            $mime = @mime_content_type($this->audioPath) ?: 'audio/webm';
-            $originalName = 'recording-' . $recording->uuid . '.' . pathinfo($this->audioPath, PATHINFO_EXTENSION);
-
-            // UploadedFile in test mode lets us hand a server-side path to the
-            // service without it complaining about the missing PHP upload check.
-            $file = new UploadedFile($this->audioPath, $originalName, $mime, null, true);
-
-            $result = app(\Platform\Core\Services\ContextFileService::class)->uploadForContext(
-                file: $file,
-                contextType: \Platform\Whisper\Models\WhisperRecording::class,
-                contextId: $recording->id,
-                options: [
-                    'folder' => $folder,
-                    'team_id' => $recording->team_id,
-                    'user_id' => $recording->created_by_user_id,
-                ],
-            );
-
-            // ContextFileService::uploadForContext returns the file's primary
-            // key under 'id' — earlier code looked for 'context_file_id'
-            // (copy-paste from a non-existent key) and silently never
-            // attached the audio reference.
-            if (empty($result['id'])) {
-                $this->recordPersistAudioWarning(
-                    $recording,
-                    'ContextFileService::uploadForContext lieferte keine id zurueck.'
-                );
-                return;
-            }
-
-            $recording->addFileReference(
-                (int) $result['id'],
-                ['kind' => 'audio_original', 'persisted_by' => 'TranscribeRecordingJob'],
-            );
+            app(RecordingAudioStore::class)->persist($recording, $this->audioPath, 'TranscribeRecordingJob');
         } catch (Throwable $e) {
             $this->recordPersistAudioWarning($recording, $e->getMessage());
         }

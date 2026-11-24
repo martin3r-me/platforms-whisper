@@ -32,6 +32,8 @@ class WhisperRecording extends Model
         'duration_seconds',
         'file_size_bytes',
         'model',
+        'source',
+        'source_id',
         'provider_id',
         'device_serial',
         'source_url',
@@ -80,5 +82,26 @@ class WhisperRecording extends Model
     public function scopeForTeam($query, int $teamId)
     {
         return $query->where('team_id', $teamId);
+    }
+
+    /**
+     * Die schon vorhandene Aufnahme derselben Quelle (Dedup). Fällt für Altdaten
+     * vor der source-Spalte auf provider_id "<source>:<id>" zurück.
+     */
+    public static function findBySource(int $teamId, string $source, string $sourceId): ?self
+    {
+        return self::query()
+            ->where('team_id', $teamId)
+            ->where(fn ($q) => $q
+                ->where(fn ($q) => $q->where('source', $source)->where('source_id', $sourceId))
+                ->orWhere('provider_id', $source . ':' . $sourceId))
+            ->first();
+    }
+
+    /** Referenz auf das gesicherte Original-Audio, falls vorhanden. */
+    public function audioReference(): mixed
+    {
+        return $this->getOrderedFileReferences()
+            ->first(fn ($r) => ($r->meta['kind'] ?? null) === 'audio_original');
     }
 }

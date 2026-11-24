@@ -9,15 +9,14 @@ use Illuminate\Routing\Controller;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
-use Platform\Whisper\Jobs\TranscribeRecordingJob;
-use Platform\Whisper\Models\WhisperRecording;
+use Platform\Whisper\Services\RecordingAudioStore;
+use Platform\Whisper\Services\RecordingIntakeService;
 use Platform\Whisper\Services\WavStereoMerger;
 use Throwable;
 
 class WhisperUploadController extends Controller
 {
-    public function store(Request $request): JsonResponse
+    public function store(Request $request, RecordingIntakeService $intake): JsonResponse
     {
         $request->validate([
             'audio' => 'required|file|max:512000', // 500 MB
@@ -35,37 +34,14 @@ class WhisperUploadController extends Controller
 
         try {
             $file = $request->file('audio');
-            $extension = strtolower($file->getClientOriginalExtension() ?: 'webm');
+            $tmpPath = RecordingAudioStore::tmpPath($file->getClientOriginalExtension() ?: 'webm');
+            $this->moveUpload($file->getRealPath(), $tmpPath);
 
-            // Persistente Tmp-Datei (überlebt den Request, wird vom Job aufgeräumt)
-            $tmpDir = storage_path('app/whisper-tmp');
-            if (!is_dir($tmpDir)) {
-                @mkdir($tmpDir, 0755, true);
-            }
-
-            $tmpName = (string) Str::uuid() . '.' . $extension;
-            $tmpPath = $tmpDir . '/' . $tmpName;
-
-            if (!@move_uploaded_file($file->getRealPath(), $tmpPath)) {
-                // Fallback (z.B. bei symlinked tmp)
-                if (!@copy($file->getRealPath(), $tmpPath)) {
-                    throw new \RuntimeException('Konnte Audio-Datei nicht im Tmp-Verzeichnis ablegen.');
-                }
-            }
-            @chmod($tmpPath, 0644);
-
-            $sizeBytes = filesize($tmpPath) ?: null;
-
-            $recording = WhisperRecording::create([
+            ['recording' => $recording] = $intake->intake([
                 'team_id' => $team->id,
                 'created_by_user_id' => $user->id,
-                'title' => 'Aufnahme vom ' . now()->format('d.m.Y H:i'),
-                'status' => WhisperRecording::STATUS_PENDING,
-                'model' => 'assemblyai',
-                'file_size_bytes' => $sizeBytes,
-            ]);
-
-            TranscribeRecordingJob::dispatch($recording->id, $tmpPath, 'de');
+                'source' => 'upload',
+            ], $tmpPath);
 
             return response()->json([
                 'id' => $recording->id,
@@ -80,13 +56,75 @@ class WhisperUploadController extends Controller
     }
 
     /**
+     * Der allgemeine Audio-Eingang (Bearer-Auth) — für die eigene App und jede
+     * weitere Quelle. Eine Datei (mono oder bereits stereo/dual), dazu woher sie
+     * kommt: source + source_id machen den Upload idempotent (ein Retry nach
+     * Netzabbruch legt keine zweite Aufnahme an).
+     */
+    public function storeAudio(Request $request, RecordingIntakeService $intake): JsonResponse
+    {
+        $validated = $request->validate([
+            'audio' => 'required|file|max:1024000', // 1 GB
+            'source' => 'required|string|max:50|regex:/^[a-z0-9_.-]+$/',
+            'source_id' => 'nullable|string|max:191',
+            'recorded_at' => 'nullable|string',
+            'title' => 'nullable|string|max:255',
+            'language' => 'nullable|string|max:10',
+            'multichannel' => 'nullable|boolean',
+            'device_serial' => 'nullable|string|max:100',
+            'meeting_inbox_item_id' => 'nullable|integer',
+        ]);
+
+        $user = Auth::user();
+        if (!$user) {
+            return response()->json(['error' => 'Unauthenticated'], 401);
+        }
+        $team = $user->currentTeam;
+        if (!$team) {
+            return response()->json(['error' => 'No team context'], 422);
+        }
+
+        try {
+            $file = $request->file('audio');
+            $tmpPath = RecordingAudioStore::tmpPath($file->getClientOriginalExtension() ?: 'bin');
+            $this->moveUpload($file->getRealPath(), $tmpPath);
+
+            ['recording' => $recording, 'duplicate' => $duplicate] = $intake->intake([
+                'team_id' => $team->id,
+                'created_by_user_id' => $user->id,
+                'title' => $validated['title'] ?? null,
+                'source' => $validated['source'],
+                'source_id' => $validated['source_id'] ?? null,
+                'recorded_at' => $validated['recorded_at'] ?? null,
+                'language' => $validated['language'] ?? 'de',
+                'multichannel' => (bool) ($validated['multichannel'] ?? false),
+                'device_serial' => $validated['device_serial'] ?? null,
+                'target_inbox_item_id' => $this->resolveTargetInboxItemId(
+                    $validated['meeting_inbox_item_id'] ?? null,
+                    (int) $team->id
+                ),
+            ], $tmpPath);
+
+            return response()->json([
+                'id' => $recording->id,
+                'uuid' => $recording->uuid,
+                'status' => $recording->status,
+                'duplicate' => $duplicate,
+            ], $duplicate ? 200 : 202);
+        } catch (Throwable $e) {
+            Log::error('Whisper audio intake failed', ['error' => $e->getMessage()]);
+            return response()->json(['error' => $e->getMessage()], 500);
+        }
+    }
+
+    /**
      * Dual-channel Upload: zwei Mono-WAVs (mic / loopback) → Stereo-Merge →
-     * eine WhisperRecording → AssemblyAI im multichannel-Mode.
+     * eine WhisperRecording → je Spur transkribiert (mic = Nutzer, loopback = Gegenseite).
      *
      * Bearer-Auth via Passport (api.auth Middleware).
      * Beide Spuren müssen identisches PCM-Format haben.
      */
-    public function storeDual(Request $request, WavStereoMerger $merger): JsonResponse
+    public function storeDual(Request $request, WavStereoMerger $merger, RecordingIntakeService $intake): JsonResponse
     {
         $validated = $request->validate([
             'mic' => 'required|file|max:512000',      // 500 MB
@@ -111,14 +149,9 @@ class WhisperUploadController extends Controller
             return response()->json(['error' => 'No team context'], 422);
         }
 
-        $tmpDir = storage_path('app/whisper-tmp');
-        if (!is_dir($tmpDir)) {
-            @mkdir($tmpDir, 0755, true);
-        }
-
-        $micTmp = $tmpDir . '/' . Str::uuid() . '_mic.wav';
-        $loopTmp = $tmpDir . '/' . Str::uuid() . '_loopback.wav';
-        $stereoTmp = $tmpDir . '/' . Str::uuid() . '_stereo.wav';
+        $micTmp = RecordingAudioStore::tmpPath('wav');
+        $loopTmp = RecordingAudioStore::tmpPath('wav');
+        $stereoTmp = RecordingAudioStore::tmpPath('wav');
 
         try {
             $this->moveUpload($request->file('mic')->getRealPath(), $micTmp);
@@ -147,32 +180,18 @@ class WhisperUploadController extends Controller
                 $request->file('mic')->getClientOriginalName()
             );
 
-            $title = $validated['title']
-                ?? 'Aufnahme vom ' . ($recordedAt ?? now())->format('d.m.Y H:i');
-
-            $sizeBytes = filesize($stereoTmp) ?: null;
-
-            $targetInboxItemId = $this->resolveTargetInboxItemId(
-                $validated['meeting_inbox_item_id'] ?? null,
-                (int) $team->id
-            );
-
-            $recording = WhisperRecording::create([
+            ['recording' => $recording] = $intake->intake([
                 'team_id' => $team->id,
                 'created_by_user_id' => $user->id,
-                'title' => $title,
-                'status' => WhisperRecording::STATUS_PENDING,
-                'model' => 'assemblyai',
-                'file_size_bytes' => $sizeBytes,
-                'target_inbox_item_id' => $targetInboxItemId,
-            ]);
-
-            TranscribeRecordingJob::dispatch(
-                $recording->id,
-                $stereoTmp,
-                'de',
-                true, // multichannel
-            );
+                'title' => $validated['title'] ?? null,
+                'source' => 'mac',
+                'recorded_at' => $recordedAt,
+                'multichannel' => true,
+                'target_inbox_item_id' => $this->resolveTargetInboxItemId(
+                    $validated['meeting_inbox_item_id'] ?? null,
+                    (int) $team->id
+                ),
+            ], $stereoTmp);
 
             // 202 Accepted: Recording-Row existiert, aber Transkription läuft
             // erst async im Queue-Worker. Erst nach completed-Status sind

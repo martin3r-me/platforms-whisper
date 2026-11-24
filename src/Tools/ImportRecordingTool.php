@@ -97,13 +97,8 @@ class ImportRecordingTool implements ToolContract, ToolMetadataContract
                 return ToolResult::error('VALIDATION_ERROR', 'title ist erforderlich.');
             }
 
-            $providerId = $source . ':' . $sourceId;
-
             // Duplikat-Check
-            $existing = WhisperRecording::query()
-                ->where('team_id', $teamId)
-                ->where('provider_id', $providerId)
-                ->first();
+            $existing = WhisperRecording::findBySource($teamId, $source, $sourceId);
 
             if ($existing) {
                 return ToolResult::success([
@@ -136,7 +131,8 @@ class ImportRecordingTool implements ToolContract, ToolMetadataContract
                 'language' => $arguments['language'] ?? 'de',
                 'duration_seconds' => isset($arguments['duration_seconds']) ? (int) $arguments['duration_seconds'] : null,
                 'model' => 'import:' . $source,
-                'provider_id' => $providerId,
+                'source' => $source,
+                'source_id' => $sourceId,
                 'device_serial' => isset($arguments['device_serial']) ? trim($arguments['device_serial']) : null,
                 'source_url' => isset($arguments['source_url']) ? trim($arguments['source_url']) : null,
                 'recorded_at' => $recordedAt,

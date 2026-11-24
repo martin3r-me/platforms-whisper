@@ -8,20 +8,31 @@ use Platform\Core\Contracts\ToolContext;
 use Platform\Core\Contracts\ToolMetadataContract;
 use Platform\Core\Contracts\ToolResult;
 use Platform\Whisper\Models\WhisperRecording;
+use Platform\Whisper\Services\LocalTranscriptionService;
+use Platform\Whisper\Services\RecordingAudioStore;
+use Platform\Whisper\Services\RecordingIntakeService;
 use Platform\Whisper\Tools\Concerns\ResolvesWhisperTeam;
 
 /**
- * Plaud-Import in EINEM Call: legt eine fertige (status=completed) WhisperRecording
- * mit Transkript + Segmenten + Speaker-Map an. Plaud transkribiert selbst — es wird
- * NICHT neu transkribiert. Der WhisperRecordingInboxObserver sieht „created +
- * completed" und ingestet die Aufnahme automatisch in den Eingang.
+ * Plaud-Import in EINEM Call.
+ *
+ * Mit audio_url wird das Audio SOFORT geladen (Plauds signierte Links laufen nach
+ * ~5 Minuten ab) und gesichert. Erkennt der eigene Server Sprecher (pyannote), geht
+ * die Aufnahme durch den gemeinsamen Eingang (RecordingIntakeService) und Whisper
+ * transkribiert selbst. Bis dahin wird Plauds Transkript übernommen — mit Audio,
+ * damit später alles neu transkribiert werden kann. Plauds Notiz bleibt als
+ * Quell-Material (source_note).
+ *
+ * Ohne audio_url: fertige (status=completed) WhisperRecording mit Plauds Transkript
+ * + Segmenten + Speaker-Map. Der WhisperRecordingInboxObserver
+ * sieht „created + completed" und ingestet die Aufnahme automatisch in den Eingang.
  *
  * whisper ist damit die EINE, quellen-agnostische Aufnahme-Schicht: Plaud (und
  * künftige Anbieter) werden WhisperRecordings. Segmente werden inline auf der
  * `segments`-Spalte abgelegt (collectSegments im Ingest-Job hat dafür einen
  * Fallback) — keine separaten Segment-Rows nötig.
  *
- * Dedup: provider_id = "plaud:<file_id>".
+ * Dedup: source = "plaud", source_id = <file_id>.
  */
 class PlaudSyncTool implements ToolContract, ToolMetadataContract
 {
@@ -34,9 +45,10 @@ class PlaudSyncTool implements ToolContract, ToolMetadataContract
 
     public function getDescription(): string
     {
-        return 'Importiert eine komplette Plaud-Aufnahme in einem Call als fertige WhisperRecording '
-            . '(Transkript + Segmente + Speaker). Wird automatisch in den Eingang ingestet. '
-            . 'Erwartet: file_id (Dedup), title, segments (aus Plaud get_transcript), metadata (start_at, duration_ms, serial_number).';
+        return 'Importiert eine Plaud-Aufnahme als WhisperRecording und ingestet sie automatisch in den Eingang. '
+            . 'Mit audio_url (presigned_url aus Plaud get_file, sofort übergeben — läuft nach Minuten ab) '
+            . 'transkribiert Whisper das Audio selbst; ohne audio_url werden Plauds segments übernommen. '
+            . 'Erwartet: file_id (Dedup), title, audio_url und/oder segments, metadata (start_at, duration_ms, serial_number).';
     }
 
     public function getSchema(): array
@@ -45,11 +57,15 @@ class PlaudSyncTool implements ToolContract, ToolMetadataContract
             'type' => 'object',
             'properties' => [
                 'team_id' => ['type' => 'integer', 'description' => 'Optional: Team-ID. Default: Kontext.'],
-                'file_id' => ['type' => 'string', 'description' => 'Plaud file ID — Dedup-Key (provider_id=plaud:<file_id>).'],
+                'file_id' => ['type' => 'string', 'description' => 'Plaud file ID — Dedup-Key (source=plaud, source_id=<file_id>).'],
+                'audio_url' => [
+                    'type' => 'string',
+                    'description' => 'presigned_url aus Plaud get_file. Wird sofort geladen; Whisper transkribiert selbst. Bevorzugt.',
+                ],
                 'title' => ['type' => 'string', 'description' => 'Titel der Aufnahme.'],
                 'segments' => [
                     'type' => 'array',
-                    'description' => 'Transcript-Utterances aus Plaud: {content, start_time (ms), end_time (ms), speaker, original_speaker}.',
+                    'description' => 'Nur ohne audio_url nötig: Transcript-Utterances aus Plaud: {content, start_time (ms), end_time (ms), speaker, original_speaker}.',
                 ],
                 'metadata' => [
                     'type' => 'object',
@@ -62,7 +78,7 @@ class PlaudSyncTool implements ToolContract, ToolMetadataContract
                 ],
                 'language' => ['type' => 'string', 'description' => 'Optional: ISO-Sprachcode. Default: "de".'],
             ],
-            'required' => ['file_id', 'title', 'segments'],
+            'required' => ['file_id', 'title'],
         ];
     }
 
@@ -76,19 +92,15 @@ class PlaudSyncTool implements ToolContract, ToolMetadataContract
 
         $fileId = trim((string) ($arguments['file_id'] ?? ''));
         $title = trim((string) ($arguments['title'] ?? ''));
+        $audioUrl = trim((string) ($arguments['audio_url'] ?? ''));
         $rawSegments = $arguments['segments'] ?? [];
         $meta = $arguments['metadata'] ?? [];
 
-        if ($fileId === '' || $title === '' || empty($rawSegments)) {
-            return ToolResult::error('VALIDATION_ERROR', 'file_id, title und segments sind erforderlich.');
+        if ($fileId === '' || $title === '' || ($audioUrl === '' && empty($rawSegments))) {
+            return ToolResult::error('VALIDATION_ERROR', 'file_id, title und audio_url oder segments sind erforderlich.');
         }
 
-        $providerId = 'plaud:' . $fileId;
-
-        $existing = WhisperRecording::query()
-            ->where('team_id', $teamId)
-            ->where('provider_id', $providerId)
-            ->first();
+        $existing = WhisperRecording::findBySource($teamId, 'plaud', $fileId);
         if ($existing) {
             return ToolResult::success([
                 'recording_id' => $existing->id,
@@ -98,11 +110,52 @@ class PlaudSyncTool implements ToolContract, ToolMetadataContract
             ]);
         }
 
-        [$transcript, $segments, $speakerMap] = $this->build($rawSegments);
-
         // Plauds eigene Notiz/Zusammenfassung roh mitnehmen (Quell-Artefakt).
         // Wird von der Ingestion als sekundäre Enrichment am Item abgelegt.
         $noteContent = trim((string) ($arguments['note_content'] ?? ''));
+
+        $audioPath = null;
+        $audioError = null;
+        if ($audioUrl !== '') {
+            try {
+                $audioPath = app(RecordingAudioStore::class)->download($audioUrl, $this->extensionFromUrl($audioUrl));
+            } catch (\Throwable $e) {
+                // Ohne Plaud-Segmente gibt es keinen Ersatz — dann scheitert der Import sichtbar.
+                if (empty($rawSegments)) {
+                    return ToolResult::error('AUDIO_DOWNLOAD_FAILED', 'Plaud-Audio nicht ladbar: ' . $e->getMessage());
+                }
+                $audioError = $e->getMessage();
+            }
+        }
+
+        // Whisper transkribiert selbst, sobald der eigene Server Sprecher erkennt — oder wenn
+        // Plaud kein Transkript liefert. Bis dahin ist Plauds Transkript (mit Sprechern und
+        // Namen) besser als eines ohne Sprecher; das Audio wird trotzdem gesichert, damit
+        // später alles mit whisper:retranscribe neu gerechnet werden kann.
+        if ($audioPath !== null && (app(LocalTranscriptionService::class)->diarizes() || empty($rawSegments))) {
+            ['recording' => $recording, 'duplicate' => $duplicate] = app(RecordingIntakeService::class)->intake([
+                'team_id' => $teamId,
+                'created_by_user_id' => $context->user?->id,
+                'title' => $title,
+                'source' => 'plaud',
+                'source_id' => $fileId,
+                'source_note' => $noteContent !== '' ? $noteContent : null,
+                'device_serial' => isset($meta['serial_number']) ? trim((string) $meta['serial_number']) : null,
+                'duration_seconds' => isset($meta['duration_ms']) ? (int) round(((int) $meta['duration_ms']) / 1000) : null,
+                'recorded_at' => isset($meta['start_at']) ? $this->utc($meta['start_at']) : null,
+                'language' => $arguments['language'] ?? 'de',
+            ], $audioPath);
+
+            return ToolResult::success([
+                'recording_id' => $recording->id,
+                'id' => $recording->id,
+                'duplicate' => $duplicate,
+                'transcription' => 'whisper',
+                'message' => "WhisperRecording #{$recording->id} angelegt (Plaud-Audio) → Whisper transkribiert, dann Eingang.",
+            ]);
+        }
+
+        [$transcript, $segments, $speakerMap] = $this->build($rawSegments);
 
         $recording = WhisperRecording::create([
             'team_id' => $teamId,
@@ -116,19 +169,36 @@ class PlaudSyncTool implements ToolContract, ToolMetadataContract
             'language' => $arguments['language'] ?? 'de',
             'duration_seconds' => isset($meta['duration_ms']) ? (int) round(((int) $meta['duration_ms']) / 1000) : null,
             'model' => 'import:plaud',
-            'provider_id' => $providerId,
+            'source' => 'plaud',
+            'source_id' => $fileId,
             'device_serial' => isset($meta['serial_number']) ? trim((string) $meta['serial_number']) : null,
             // Plaud-Timestamps sind UTC (naive Strings als UTC interpretieren).
             'recorded_at' => isset($meta['start_at']) ? $this->utc($meta['start_at']) : null,
-            'status' => WhisperRecording::STATUS_COMPLETED,
+            // Mit Audio erst processing: das Audio muss gesichert sein, BEVOR der Übergang auf
+            // completed den Eingang auslöst (sonst landet das Item ohne Wiedergabe im Eingang).
+            'status' => $audioPath !== null ? WhisperRecording::STATUS_PROCESSING : WhisperRecording::STATUS_COMPLETED,
+            'error_message' => $audioError !== null ? mb_substr('Plaud-Audio nicht geladen, nur Plaud-Transkript: ' . $audioError, 0, 1000) : null,
         ]);
-        // → WhisperRecordingInboxObserver (created + completed) dispatcht
+
+        if ($audioPath !== null) {
+            try {
+                app(RecordingAudioStore::class)->persist($recording, $audioPath, 'whisper.plaud.sync');
+            } catch (\Throwable $e) {
+                $recording->error_message = mb_substr('Audio-Persist: ' . $e->getMessage(), 0, 1000);
+            } finally {
+                @unlink($audioPath);
+            }
+            $recording->status = WhisperRecording::STATUS_COMPLETED;
+            $recording->save();
+        }
+        // → WhisperRecordingInboxObserver (completed) dispatcht
         //   IngestRecordingToInboxJob → Eingang (inkl. inbox-nativem Enrichment).
 
         return ToolResult::success([
             'recording_id' => $recording->id,
             'id' => $recording->id,
             'duplicate' => false,
+            'transcription' => 'plaud',
             'segments_count' => count($segments),
             'speakers_count' => count($speakerMap),
             'message' => "WhisperRecording #{$recording->id} angelegt (Plaud) → Eingang folgt.",
@@ -176,6 +246,14 @@ class PlaudSyncTool implements ToolContract, ToolMetadataContract
         }
 
         return [implode("\n\n", $lines), $segments, $names];
+    }
+
+    /** Dateiendung aus dem Pfad einer (signierten) URL, z. B. "ogg". */
+    protected function extensionFromUrl(string $url): string
+    {
+        $ext = strtolower(pathinfo((string) parse_url($url, PHP_URL_PATH), PATHINFO_EXTENSION));
+
+        return preg_match('/^[a-z0-9]{2,5}$/', $ext) ? $ext : 'ogg';
     }
 
     protected function utc(mixed $v): ?Carbon
