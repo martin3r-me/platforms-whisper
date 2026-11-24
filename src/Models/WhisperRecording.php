@@ -74,6 +74,12 @@ class WhisperRecording extends Model
         return $this->belongsTo(\Platform\Core\Models\User::class, 'created_by_user_id');
     }
 
+    /** Woran die Aufnahme hängt (Morph-Alias + ID), siehe Services\RecordingLinks. */
+    public function links(): HasMany
+    {
+        return $this->hasMany(WhisperRecordingLink::class, 'recording_id');
+    }
+
     public function segmentRows(): HasMany
     {
         return $this->hasMany(WhisperSegment::class, 'whisper_recording_id');

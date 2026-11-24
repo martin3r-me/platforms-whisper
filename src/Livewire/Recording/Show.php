@@ -9,6 +9,7 @@ use Livewire\Component;
 use Platform\Core\Livewire\Concerns\HasPageContext;
 use Platform\Whisper\Models\WhisperRecording;
 use Platform\Whisper\Services\RecordingIntakeService;
+use Platform\Whisper\Services\RecordingLinks;
 
 class Show extends Component
 {
@@ -83,6 +84,13 @@ class Show extends Component
         $intake->retranscribe($recording, $recording->source === 'mac');
     }
 
+    public function unlink(string $linkableType, int $linkableId, RecordingLinks $links): void
+    {
+        if ($recording = $this->recording) {
+            $links->unlink($recording, $linkableType, $linkableId);
+        }
+    }
+
     public function delete()
     {
         $this->recording?->delete();
@@ -126,8 +134,25 @@ class Show extends Component
             'speakers' => $speakers,
             'audioUrl' => $audio['url'] ?? null,
             'sourceNoteHtml' => $this->sourceNoteHtml($recording->source_note),
+            'links' => $this->describedLinks($recording),
             'isInFlight' => in_array($recording->status, [WhisperRecording::STATUS_PENDING, WhisperRecording::STATUS_PROCESSING], true),
         ])->layout('platform::layouts.app');
+    }
+
+    /** @return array<int, array{type: string, label: string, linkable_type: string, linkable_id: int, role: ?string}> */
+    protected function describedLinks(WhisperRecording $recording): array
+    {
+        $links = app(RecordingLinks::class);
+
+        return $links->linksFor($recording)
+            ->map(fn ($link) => ($d = $links->describe($link)) ? $d + [
+                'linkable_type' => $link->linkable_type,
+                'linkable_id' => $link->linkable_id,
+                'role' => $link->role,
+            ] : null)
+            ->filter()
+            ->values()
+            ->all();
     }
 
     /** Notiz der Quelle (Plaud-Markdown) → HTML; Plaud-interne Links/Karten raus. */

@@ -109,6 +109,10 @@ class WhisperServiceProvider extends ServiceProvider
             // bewusst umgedreht, damit Plaud-Aufnahmen auch in whispers Store/Suche
             // landen und künftige Anbieter denselben Weg nehmen.)
             $registry->register(new \Platform\Whisper\Tools\PlaudSyncTool());
+            // Anhänge-Naht: Aufnahmen lose an Objekte anderer Module (Morph-Alias), wie slides.links.*.
+            $registry->register(new \Platform\Whisper\Tools\ListRecordingLinksTool());
+            $registry->register(new \Platform\Whisper\Tools\CreateRecordingLinkTool());
+            $registry->register(new \Platform\Whisper\Tools\DeleteRecordingLinkTool());
             // Q&A (AskRecordingQuestionTool) moved to the Inbox enrichment
             // pipeline along with summaries and action items.
         } catch (\Throwable $e) {

@@ -157,6 +157,25 @@
                         @endif
                     </x-nx-property-row>
                 @endif
+                @if(count($links) > 0)
+                    <x-nx-property-row icon="heroicon-o-link" label="Hängt an">
+                        <div class="flex flex-wrap items-center gap-1.5">
+                            @foreach($links as $link)
+                                <span wire:key="link-{{ $link['linkable_type'] }}-{{ $link['linkable_id'] }}"
+                                      class="group/link inline-flex items-center gap-1 rounded-full bg-[color:var(--nx-accent-soft)] py-0.5 pl-2 pr-1 text-xs">
+                                    <span class="text-[color:var(--nx-muted)]">{{ $link['type'] }}</span>
+                                    <span class="font-medium text-[color:var(--nx-text)]">{{ $link['label'] }}</span>
+                                    <button type="button" title="Verknüpfung lösen"
+                                            wire:click="unlink(@js($link['linkable_type']), {{ $link['linkable_id'] }})"
+                                            wire:confirm="Verknüpfung mit „{{ $link['label'] }}“ lösen? Die Aufnahme bleibt erhalten."
+                                            class="flex h-4 w-4 items-center justify-center rounded-full text-[color:var(--nx-faint)] hover:bg-[color:var(--nx-hover)] hover:text-[color:var(--nx-text)]">
+                                        @svg('heroicon-o-x-mark', 'h-3 w-3')
+                                    </button>
+                                </span>
+                            @endforeach
+                        </div>
+                    </x-nx-property-row>
+                @endif
                 <x-nx-property-row icon="heroicon-o-language" label="Sprache">{{ $recording->language ? strtoupper($recording->language) : '—' }}</x-nx-property-row>
                 @if($recording->device_serial)
                     <x-nx-property-row icon="heroicon-o-device-phone-mobile" label="Gerät">
