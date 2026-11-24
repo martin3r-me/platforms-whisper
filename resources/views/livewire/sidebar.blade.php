@@ -7,8 +7,8 @@
     {{-- Abschnitt: Allgemein --}}
     <x-ui-sidebar-list label="Allgemein">
         <x-ui-sidebar-item :href="route('whisper.dashboard')">
-            @svg('heroicon-o-home', 'w-4 h-4 text-[var(--ui-secondary)]')
-            <span class="ml-2 text-sm">Dashboard</span>
+            @svg('heroicon-o-queue-list', 'w-4 h-4 text-[var(--ui-secondary)]')
+            <span class="ml-2 text-sm">Aufnahmen</span>
         </x-ui-sidebar-item>
         <x-ui-sidebar-item :href="route('whisper.dashboard') . '#recorder'">
             @svg('heroicon-o-microphone', 'w-4 h-4 text-[var(--ui-secondary)]')

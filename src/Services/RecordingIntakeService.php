@@ -104,8 +104,8 @@ class RecordingIntakeService
             return null;
         }
 
-        // Bewusst KEIN Status-Wechsel auf pending hier: erst der Job setzt
-        // processing → completed, und genau dieser Übergang löst den Eingang aus.
+        // pending → (Job) processing → completed; der Übergang auf completed löst den Eingang aus.
+        $recording->update(['status' => WhisperRecording::STATUS_PENDING, 'error_message' => null]);
         TranscribeRecordingJob::dispatch($recording->id, $path, $recording->language ?: 'de', $multichannel);
 
         return $recording;
