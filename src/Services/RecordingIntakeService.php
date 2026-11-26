@@ -52,7 +52,7 @@ class RecordingIntakeService
             $recording = WhisperRecording::create([
                 'team_id' => $teamId,
                 'created_by_user_id' => $attrs['created_by_user_id'] ?? null,
-                'title' => $attrs['title'] ?: 'Aufnahme vom ' . ($recordedAt ?? now())->format('d.m.Y H:i'),
+                'title' => ($attrs['title'] ?? null) ?: 'Aufnahme vom ' . ($recordedAt ?? now())->format('d.m.Y H:i'),
                 'source' => $source,
                 'source_id' => $sourceId !== '' ? $sourceId : null,
                 'source_note' => ($attrs['source_note'] ?? null) ?: null,
